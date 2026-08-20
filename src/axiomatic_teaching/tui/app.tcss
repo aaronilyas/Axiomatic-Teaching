@@ -1,0 +1,272 @@
+/* Dark, dense, high-contrast Axiomatic Teaching chrome. */
+
+Screen {
+    background: #07090c;
+    color: #eef3f8;
+    layout: vertical;
+}
+
+Header {
+    dock: top;
+    background: #0e1620;
+    color: #7ee0ff;
+    text-style: bold;
+}
+
+Footer {
+    dock: bottom;
+    background: #0e1620;
+    color: #c5d0da;
+}
+
+StatusBar {
+    height: 1;
+    background: #0e141b;
+    color: #c5d0da;
+    padding: 0 1;
+}
+
+.panel {
+    background: #0c1117;
+    border: tall #1e2a36;
+    padding: 0 1;
+}
+
+.panel-title {
+    height: 1;
+    text-style: bold;
+    color: #7ee0ff;
+}
+
+.muted {
+    color: #7b8794;
+}
+
+Button {
+    min-width: 10;
+    height: 3;
+}
+
+Input, Select, TextArea {
+    background: #080b0f;
+    color: #eef3f8;
+    border: tall #2a3b4c;
+}
+
+Input:focus, Select:focus, TextArea:focus {
+    border: tall #7ee0ff;
+}
+
+OptionList {
+    background: #0c1117;
+    border: none;
+    padding: 0;
+    height: 1fr;
+}
+
+OptionList > .option-list--option-highlighted {
+    background: #163445;
+    color: #7ee0ff;
+}
+
+OptionList > .option-list--option-disabled {
+    color: #7b8794;
+}
+
+/* Home */
+
+#home-body {
+    height: 1fr;
+    layout: horizontal;
+}
+
+#home-main {
+    width: 2fr;
+    height: 1fr;
+}
+
+#home-side {
+    width: 1fr;
+    height: 1fr;
+    layout: vertical;
+}
+
+#home-due, #home-banked {
+    height: 1fr;
+}
+
+#home-hints {
+    height: 2;
+    padding: 0 1;
+    color: #7b8794;
+}
+
+/* Study */
+
+#study-body {
+    height: 1fr;
+    layout: horizontal;
+}
+
+#study-lessons {
+    width: 24;
+    height: 1fr;
+}
+
+#study-center {
+    width: 1fr;
+    height: 1fr;
+    layout: vertical;
+}
+
+#study-right {
+    width: 34;
+    height: 1fr;
+    layout: vertical;
+}
+
+ChatStream {
+    height: 1fr;
+    background: #080b0f;
+    border: tall #1e2a36;
+}
+
+InputBar {
+    height: 6;
+}
+
+CriteriaPanel, ConnectionsPanel {
+    height: 1fr;
+}
+
+/* Wizard */
+
+#wizard-card {
+    width: 96;
+    max-width: 100%;
+    height: auto;
+    margin: 1 2;
+    background: #0c1117;
+    border: tall #7ee0ff;
+    padding: 1 2;
+}
+
+#wizard-step-label {
+    height: 1;
+}
+
+#wizard-hint {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#step-fields {
+    height: auto;
+}
+
+#field-long {
+    height: 8;
+}
+
+#step-criteria {
+    height: auto;
+}
+
+#criteria-editor {
+    height: 18;
+}
+
+#crit-list {
+    width: 1fr;
+    border: tall #1e2a36;
+}
+
+#crit-form {
+    width: 1fr;
+    padding-left: 1;
+}
+
+#crit-statement {
+    height: 5;
+}
+
+#crit-required-row {
+    height: 3;
+    align: left middle;
+}
+
+#crit-buttons {
+    height: 3;
+}
+
+#wizard-nav {
+    height: 3;
+    margin-top: 1;
+    align: left middle;
+}
+
+/* Knowledge */
+
+#knowledge-body {
+    height: 1fr;
+    layout: horizontal;
+}
+
+#knowledge-lessons {
+    width: 32;
+    height: 1fr;
+}
+
+#knowledge-detail {
+    width: 1fr;
+    height: 1fr;
+    layout: vertical;
+}
+
+#knowledge-evidence, #knowledge-graph {
+    height: 1fr;
+}
+
+/* Review */
+
+#review-card {
+    width: 80;
+    max-width: 100%;
+    height: auto;
+    margin: 2 4;
+    padding: 1 2;
+    border: tall #7ee0ff;
+    background: #0c1117;
+}
+
+#review-body {
+    height: auto;
+    min-height: 8;
+    padding: 1 0;
+}
+
+#review-buttons {
+    height: 3;
+    align: left middle;
+}
+
+/* Help */
+
+HelpScreen {
+    align: center middle;
+    background: #07090c 70%;
+}
+
+#help-card {
+    width: 72;
+    height: auto;
+    max-height: 90%;
+    background: #10161d;
+    border: tall #7ee0ff;
+    padding: 1 2;
+}
+
+#help-body {
+    height: auto;
+    padding: 1 0;
+}

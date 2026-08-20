@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "axiomatic-teaching"
+version = "0.1.0"
+description = "Terminal tutor that intermediates a learner and Grok Build over ACP, banking knowledge only through a success-gated tool."
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.12"
+authors = [{ name = "Axiomatic Teaching" }]
+keywords = ["tui", "education", "grok", "acp", "fsrs"]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Environment :: Console",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+]
+dependencies = [
+    "textual>=2.0",
+    "agent-client-protocol>=0.12.1",
+    "sqlalchemy>=2.0",
+    "mcp>=1.9",
+    "fsrs>=6.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+axiomatic-teach = "axiomatic_teaching.cli:main"
+axiomatic-teach-mcp = "axiomatic_teaching.mcp_server.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/axiomatic_teaching"]
+# Editable installs must put `src/` on sys.path (package lives under src/).
+dev-mode-dirs = ["src"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/axiomatic_teaching" = "axiomatic_teaching"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

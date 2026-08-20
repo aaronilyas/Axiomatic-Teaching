@@ -1,0 +1,158 @@
+"""Streaming chat log for ACP events."""
+
+from __future__ import annotations
+
+from rich.markup import escape
+from rich.panel import Panel
+from rich.text import Text
+
+from textual.timer import Timer
+from textual.widgets import RichLog
+
+from axiomatic_teaching.acp_client.events import (
+    PlanEvent,
+    StreamChunk,
+    ThoughtChunk,
+    ToolCallEvent,
+)
+from axiomatic_teaching.tui import is_gate_tool
+
+
+class ChatStream(RichLog):
+    DEFAULT_CSS = """
+    ChatStream {
+        height: 1fr;
+        width: 1fr;
+        background: #080b0f;
+        border: tall #1e2a36;
+        padding: 0 1;
+    }
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(
+            highlight=False,
+            markup=True,
+            wrap=True,
+            min_width=16,
+            max_lines=4000,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        self._stream_role: str | None = None
+        self._stream_buffer = ""
+        self._partial_timer: Timer | None = None
+
+    def write_system(self, text: str) -> None:
+        self._flush_stream()
+        self.write(f"[dim]{escape(text)}[/]")
+
+    def append_stream(self, chunk: StreamChunk) -> None:
+        role = chunk.role or "agent"
+        if self._stream_role not in (None, role):
+            self._flush_stream()
+        if self._stream_role is None:
+            self._stream_role = role
+            prefix = _role_prefix(role)
+            if prefix:
+                self.write(prefix)
+        self._stream_buffer += chunk.text
+        while "\n" in self._stream_buffer:
+            line, self._stream_buffer = self._stream_buffer.split("\n", 1)
+            self.write(escape(line) if line else "")
+        self._arm_partial_flush()
+
+    def append_thought(self, thought: ThoughtChunk) -> None:
+        self._flush_stream()
+        text = thought.text.strip()
+        if not text:
+            return
+        self.write(f"[dim italic]thinking · {escape(text)}[/]")
+
+    def append_tool(self, event: ToolCallEvent) -> None:
+        self._flush_stream()
+        gate = is_gate_tool(event)
+        title = event.title or event.kind or event.tool_call_id or "tool"
+        status = event.status or "pending"
+        heading = "GATE" if gate else "TOOL"
+        accent = "cyan" if gate else "yellow"
+        if status in {"pending", "in_progress"}:
+            self.write(
+                f"[{accent}]{heading}[/] {escape(title)}  [dim]{escape(status)}[/]"
+            )
+            return
+        detail_lines = [f"[bold]{escape(title)}[/]", f"[dim]{escape(status)}[/]"]
+        if event.raw_output is not None:
+            preview = _preview(event.raw_output)
+            if preview:
+                detail_lines.append(preview)
+        body = Text.from_markup("\n".join(detail_lines))
+        self.write(
+            Panel(
+                body,
+                title=heading,
+                border_style=accent,
+                padding=(0, 1),
+            )
+        )
+
+    def append_plan(self, event: PlanEvent) -> None:
+        self._flush_stream()
+        if not event.entries:
+            return
+        lines = ["[dim]plan[/]"]
+        for index, entry in enumerate(event.entries, start=1):
+            lines.append(f"[dim]{index}. {escape(entry)}[/]")
+        self.write("\n".join(lines))
+
+    def append_user(self, text: str) -> None:
+        self._flush_stream()
+        self.write(f"[bold cyan]you[/] {escape(text)}")
+
+    def reset(self) -> None:
+        if self._partial_timer is not None:
+            self._partial_timer.stop()
+            self._partial_timer = None
+        self._stream_role = None
+        self._stream_buffer = ""
+        self.clear()
+
+    def _arm_partial_flush(self) -> None:
+        if self._partial_timer is not None:
+            self._partial_timer.stop()
+        self._partial_timer = self.set_timer(0.08, self._flush_partial)
+
+    def _flush_partial(self) -> None:
+        self._partial_timer = None
+        if self._stream_buffer:
+            self.write(escape(self._stream_buffer))
+            self._stream_buffer = ""
+
+    def _flush_stream(self) -> None:
+        if self._partial_timer is not None:
+            self._partial_timer.stop()
+            self._partial_timer = None
+        leftover = self._stream_buffer
+        self._stream_buffer = ""
+        role = self._stream_role
+        self._stream_role = None
+        if leftover:
+            self.write(escape(leftover))
+        elif role is None:
+            return
+
+
+def _role_prefix(role: str) -> str:
+    if role == "user":
+        return "[bold cyan]you[/]"
+    if role == "system":
+        return "[dim]system[/]"
+    return "[bold]tutor[/]"
+
+
+def _preview(payload: object, limit: int = 240) -> str:
+    text = str(payload).strip()
+    if not text:
+        return ""
+    if len(text) > limit:
+        text = text[: limit - 1] + "…"
+    return f"[dim]{escape(text)}[/]"
