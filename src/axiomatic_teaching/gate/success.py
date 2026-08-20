@@ -85,8 +85,10 @@ def evaluate(lesson: Lesson, request: RecordSuccessRequest) -> GateResult:
 
     known = {c.id: c for c in lesson.criteria}
     by_id: dict[str, EvidenceItem] = {}
+    ignored: list[str] = []
     for item in request.evidence:
         if item.criterion_id not in known:
+            ignored.append(item.criterion_id)
             continue
         by_id.setdefault(item.criterion_id, item)
 
@@ -109,17 +111,21 @@ def evaluate(lesson: Lesson, request: RecordSuccessRequest) -> GateResult:
             continue
         unmet.extend(_check_item(criterion, item))
 
+    ignored_note = ""
+    if ignored:
+        ignored_note = " Ignored unknown criterion_id(s): " + ", ".join(ignored) + "."
+
     if unmet:
         return GateResult(
             accepted=False,
             lesson_id=lesson.id,
             unmet=unmet,
-            message="Success criteria were not met.",
+            message="Success criteria were not met." + ignored_note,
         )
     return GateResult(
         accepted=True,
         already_banked=False,
         lesson_id=lesson.id,
         unmet=[],
-        message="Lesson banked.",
+        message="Lesson banked." + ignored_note,
     )

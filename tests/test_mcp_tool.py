@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
+
+import pytest
 
 from axiomatic_teaching.db.repository import create_repository
 from axiomatic_teaching.mcp_server.server import (
+    _repository,
     get_connections,
     get_lesson_criteria,
     list_banked_lessons,
     record_lesson_success,
+    reset_repository_cache,
 )
 from axiomatic_teaching.models import (
     CriterionDraft,
@@ -19,6 +24,13 @@ from axiomatic_teaching.models import (
 )
 
 PASSING_TEXT = "alpha " + ("word " * 20)
+
+
+@pytest.fixture(autouse=True)
+def _reset_mcp_repo() -> Iterator[None]:
+    reset_repository_cache()
+    yield
+    reset_repository_cache()
 
 
 def _make_lesson(tmp_path: Path, monkeypatch):
@@ -85,9 +97,10 @@ def test_record_lesson_success_insufficient_then_sufficient(tmp_path: Path, monk
     assert repo.get_fsrs_card(lesson.id) is not None
 
     banked = list_banked_lessons()
-    assert any(item["id"] == lesson.id for item in banked)
-    assert "Bayes" in banked[0]["concepts"] or any(
-        "Bayes" in item.get("concepts", []) for item in banked
+    rows = banked["lessons"] if isinstance(banked, dict) else banked
+    assert any(item["id"] == lesson.id for item in rows)
+    assert "Bayes" in rows[0]["concepts"] or any(
+        "Bayes" in item.get("concepts", []) for item in rows
     )
 
 
@@ -145,3 +158,11 @@ def test_get_connections_one_hop(tmp_path: Path, monkeypatch) -> None:
     rel = payload["relations"][0]
     assert {rel["from_name"], rel["to_name"]} == {"Bayes", "Stats"}
     _ = repo
+
+
+def test_mcp_repository_is_cached(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "axiomatic.db"
+    monkeypatch.setenv("AXIOMATIC_DB", str(db_path))
+    first = _repository()
+    second = _repository()
+    assert first is second

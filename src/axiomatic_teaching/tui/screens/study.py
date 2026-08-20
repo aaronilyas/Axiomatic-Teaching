@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from textual import on
@@ -19,6 +20,7 @@ from axiomatic_teaching.acp_client.events import (
     ThoughtChunk,
     ToolCallEvent,
 )
+from axiomatic_teaching.graph.queries import select_related_banked
 from axiomatic_teaching.models import GateResult, Lesson, LessonStatus
 from axiomatic_teaching.tui import is_gate_tool, parse_gate_result
 from axiomatic_teaching.tui.widgets.chat_stream import ChatStream
@@ -78,6 +80,8 @@ class StudyScreen(Screen[None]):
         self.query_one("#study-lesson-list", LessonList).set_lessons(
             lessons, group=False, selected_id=self.lesson.id
         )
+        if self.lesson.status == LessonStatus.COMPLETED:
+            self.notify("Already banked — restudy only; the gate will not re-bank.")
         self._refresh_panels()
         chat = self.query_one(ChatStream)
         if self.app.session_factory is None:
@@ -92,6 +96,11 @@ class StudyScreen(Screen[None]):
 
     async def on_unmount(self) -> None:
         self._starting = False
+        try:
+            self.workers.cancel_group("acp-send")
+            self.workers.cancel_group("session")
+        except Exception:
+            pass
         await self._shutdown_session()
 
     def handle_acp_event(self, event: object) -> None:
@@ -143,7 +152,30 @@ class StudyScreen(Screen[None]):
             due = self.app.list_due()
         except Exception:
             due = []
-        self.query_one(ConnectionsPanel).show(relations, due, concepts)
+        related = []
+        style_notes: list[str] = []
+        try:
+            related = select_related_banked(self.app.repository, lesson)
+        except Exception:
+            related = []
+        try:
+            style_notes = [item.note for item in self.app.repository.list_style_notes(limit=3)]
+        except Exception:
+            style_notes = []
+        self.query_one(ConnectionsPanel).show(
+            relations, due, concepts, related=related, style_notes=style_notes
+        )
+        try:
+            lessons = [
+                item
+                for item in self.app.list_lessons()
+                if item.status not in {LessonStatus.DRAFT, LessonStatus.ARCHIVED}
+            ]
+            self.query_one("#study-lesson-list", LessonList).set_lessons(
+                lessons, group=False, selected_id=lesson.id
+            )
+        except Exception:
+            pass
         self.app.refresh_counts()
         self.query_one(StatusBar).refresh_status()
 
@@ -199,12 +231,22 @@ class StudyScreen(Screen[None]):
                 )
                 self.query_one(StatusBar).refresh_status()
                 return
+            session_id = getattr(session, "session_id", None)
+            if session_id:
+                try:
+                    now = datetime.now(timezone.utc)
+                    self.app.repository.set_last_session(lesson.id, session_id)
+                    self.app.repository.record_acp_session(
+                        lesson.id, session_id, started_at=now
+                    )
+                except Exception:
+                    pass
             self.app.apply_agent_status(
                 AgentStatus(
                     connected=True,
                     message="connected",
                     busy=bool(getattr(session, "busy", False)),
-                    session_id=getattr(session, "session_id", None),
+                    session_id=session_id,
                 )
             )
             self.query_one(StatusBar).refresh_status()
@@ -217,10 +259,27 @@ class StudyScreen(Screen[None]):
         self.session = None
         if session is None:
             return
+        session_id = getattr(session, "session_id", None)
+        lesson = self.lesson
+        try:
+            await session.cancel()
+        except Exception:
+            pass
         try:
             await session.shutdown()
         except Exception:
             pass
+        if session_id and lesson is not None:
+            try:
+                self.app.repository.record_acp_session(
+                    lesson.id,
+                    session_id,
+                    started_at=datetime.now(timezone.utc),
+                    ended_at=datetime.now(timezone.utc),
+                    stop_reason="shutdown",
+                )
+            except Exception:
+                pass
         self.app.apply_agent_status(
             AgentStatus(connected=False, message="ACP not connected", busy=False)
         )
@@ -244,25 +303,36 @@ class StudyScreen(Screen[None]):
         if session is None:
             chat.write_system("ACP not connected")
             return
-        if bool(getattr(session, "busy", False)):
+        if bool(getattr(session, "busy", False)) or self.app.acp_busy:
             self.notify("Agent is busy. Cancel with ctrl+c.", severity="warning")
             return
-        self.run_worker(self._send_worker(text), group="acp-send")
+        self.app.acp_busy = True
+        self.query_one(StatusBar).refresh_status()
+        self.run_worker(self._send_worker(text), group="acp-send", exclusive=True)
 
     async def _send_worker(self, text: str) -> None:
         session = self.session
         if session is None:
             return
         self.app.acp_busy = True
-        self.query_one(StatusBar).refresh_status()
+        try:
+            self.query_one(StatusBar).refresh_status()
+        except Exception:
+            pass
         try:
             await session.send(text)
         except Exception as exc:
-            self.query_one(ChatStream).write_system(f"Send failed: {exc}")
+            try:
+                self.query_one(ChatStream).write_system(f"Send failed: {exc}")
+            except Exception:
+                pass
         finally:
             busy = bool(getattr(self.session, "busy", False)) if self.session else False
             self.app.acp_busy = busy
-            self.query_one(StatusBar).refresh_status()
+            try:
+                self.query_one(StatusBar).refresh_status()
+            except Exception:
+                pass
 
     async def action_cancel_turn(self) -> None:
         session = self.session

@@ -10,7 +10,7 @@ from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
-from axiomatic_teaching.models import Concept, ConceptRelation, DueReview
+from axiomatic_teaching.models import BankedLessonSummary, Concept, ConceptRelation, DueReview
 from axiomatic_teaching.tui import format_dt, format_relation
 
 
@@ -35,6 +35,8 @@ class ConnectionsPanel(Vertical):
         relations: Sequence[ConceptRelation],
         due: Sequence[DueReview],
         concepts: Sequence[Concept] | None = None,
+        related: Sequence[BankedLessonSummary] | None = None,
+        style_notes: Sequence[str] | None = None,
     ) -> None:
         try:
             body = self.query_one("#connections-body", Static)
@@ -46,6 +48,17 @@ class ConnectionsPanel(Vertical):
                 lines.append(escape(format_relation(relation, concepts)))
         else:
             lines.append("[dim]None yet.[/]")
+        if related:
+            lines.append("")
+            lines.append("[bold]Related banked[/]")
+            for item in related:
+                topic = f"  [dim]{escape(item.topic)}[/]" if item.topic else ""
+                lines.append(f"{escape(item.title)}{topic}")
+        if style_notes:
+            lines.append("")
+            lines.append("[bold]Style[/]")
+            for note in style_notes:
+                lines.append(f"[dim]{escape(note)}[/]")
         lines.append("")
         lines.append("[bold]Due reviews[/]")
         if due:

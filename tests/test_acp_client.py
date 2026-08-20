@@ -41,7 +41,7 @@ async def test_grok_session_echo_roundtrip(tmp_path: Path, monkeypatch: pytest.M
                 for event in events
                 if isinstance(event, ToolCallEvent) and event.is_success_gate
             ]
-            assert gates, f"expected record_lesson_success tool call, got {events!r}"
+            assert not gates, f"demo echo must not fake record_lesson_success, got {gates!r}"
         finally:
             await session.shutdown()
             assert session.busy is False

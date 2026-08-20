@@ -346,3 +346,47 @@ def test_already_completed_no_duplicate_completion(tmp_path: Path) -> None:
         assert _count(session, CompletionRow, lesson_id=lesson.id) == 1
         assert _count(session, StyleNoteRow, lesson_id=lesson.id) == 1
         assert _count(session, ConceptRow) == 1
+
+
+def test_unknown_ids_mentioned_in_message() -> None:
+    lesson = _lesson()
+    result = evaluate(
+        lesson,
+        _request(
+            lesson,
+            [
+                EvidenceItem(criterion_id="c-req", text=PASSING_TEXT, met=True),
+                EvidenceItem(criterion_id="ghost", text="x", met=False),
+            ],
+        ),
+    )
+    assert result.accepted is True
+    assert "ghost" in result.message
+
+
+def test_concurrent_record_success_single_completion(tmp_path: Path) -> None:
+    import threading
+
+    repo = _repo(tmp_path)
+    lesson = repo.create_lesson(_spec(optional=False))
+    req_id = _required_id(repo, lesson.id)
+    request = RecordSuccessRequest(
+        lesson_id=lesson.id,
+        evidence=[EvidenceItem(criterion_id=req_id, text=PASSING_TEXT, met=True)],
+        style_note="only once",
+    )
+    results: list = []
+
+    def _call() -> None:
+        results.append(repo.record_success(request))
+
+    threads = [threading.Thread(target=_call) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(results) == 2
+    assert all(item.accepted for item in results)
+    assert sum(1 for item in results if item.already_banked) >= 1
+    assert len(repo.list_completions()) == 1
+    assert len(repo.list_style_notes()) == 1

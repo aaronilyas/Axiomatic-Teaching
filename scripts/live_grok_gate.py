@@ -79,7 +79,31 @@ async def main() -> int:
     completion = repo.get_completion(lesson.id)
     print("STATUS", None if fresh is None else fresh.status)
     print("COMPLETION", None if completion is None else completion.id)
-    return 0 if completion is not None else 2
+    from axiomatic_teaching.db.engine import session_scope
+    from axiomatic_teaching.db.orm import GateAttemptRow
+    from sqlalchemy import select
+
+    attempts = []
+    with session_scope(repo.engine) as session:
+        attempts = list(
+            session.scalars(
+                select(GateAttemptRow)
+                .where(GateAttemptRow.lesson_id == lesson.id)
+                .order_by(GateAttemptRow.created_at.asc())
+            )
+        )
+    print("GATE_ATTEMPTS", len(attempts))
+    for row in attempts:
+        print("ATTEMPT", row.accepted, row.result_json[:200])
+    if not attempts:
+        print("FAIL: Grok never called record_lesson_success")
+        return 2
+    if attempts[0].accepted:
+        print("WARN: first attempt was accepted; Grok skipped the insufficient-evidence call")
+    if completion is None:
+        print("FAIL: lesson was not banked after the sufficient call")
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

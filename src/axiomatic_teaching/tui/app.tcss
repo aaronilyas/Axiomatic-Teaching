@@ -172,6 +172,11 @@ CriteriaPanel, ConnectionsPanel {
     height: auto;
 }
 
+#crit-help {
+    height: auto;
+    margin-bottom: 1;
+}
+
 #criteria-editor {
     height: 18;
 }

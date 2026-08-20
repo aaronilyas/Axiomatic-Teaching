@@ -6,6 +6,7 @@ from axiomatic_teaching.mcp_server.server import (
     list_banked_lessons,
     main,
     record_lesson_success,
+    reset_repository_cache,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "list_banked_lessons",
     "main",
     "record_lesson_success",
+    "reset_repository_cache",
 ]

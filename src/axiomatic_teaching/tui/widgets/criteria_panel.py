@@ -16,10 +16,12 @@ def _mark(criterion: Criterion, result: GateResult | None) -> str:
         return "[dim]○[/]"
     unmet_ids = {item.criterion_id for item in result.unmet if item.criterion_id}
     if result.accepted:
-        return "[green]✓[/]"
+        if criterion.required:
+            return "[green]✓[/]"
+        return "[dim]○[/]" if criterion.id not in unmet_ids else "[red]✗[/]"
     if criterion.id in unmet_ids:
         return "[red]✗[/]"
-    return "[green]✓[/]"
+    return "[dim]○[/]"
 
 
 class CriteriaPanel(Vertical):
@@ -44,6 +46,8 @@ class CriteriaPanel(Vertical):
             yield Static("[dim]No lesson selected.[/]", id="criteria-body")
 
     def set_lesson(self, lesson: Lesson | None) -> None:
+        if self._lesson is None or lesson is None or self._lesson.id != lesson.id:
+            self._result = None
         self._lesson = lesson
         self._refresh_body()
 
@@ -75,24 +79,27 @@ class CriteriaPanel(Vertical):
             if self._result.message:
                 lines.append(f"[dim]{escape(self._result.message)}[/]")
             lines.append("")
-        unmet_reasons = {
-            item.criterion_id: item.reason
-            for item in (self._result.unmet if self._result is not None else [])
-            if item.criterion_id
-        }
-        general = [
-            item.reason
-            for item in (self._result.unmet if self._result is not None else [])
-            if not item.criterion_id
-        ]
+        unmet_reasons: dict[str, list[str]] = {}
+        general: list[str] = []
+        for item in self._result.unmet if self._result is not None else []:
+            if item.criterion_id:
+                unmet_reasons.setdefault(item.criterion_id, []).append(item.reason)
+            else:
+                general.append(item.reason)
         for criterion in sorted(criteria, key=lambda item: item.sort_order):
             req = "req" if criterion.required else "opt"
             kind = criterion.kind
             mark = _mark(criterion, self._result)
             statement = escape(criterion.statement)
             lines.append(f"{mark} [{kind}/{req}] {statement}")
-            reason = unmet_reasons.get(criterion.id)
-            if reason:
+            extras = []
+            if criterion.min_evidence_chars:
+                extras.append(f"min {criterion.min_evidence_chars} chars")
+            if criterion.keywords:
+                extras.append("keywords: " + ", ".join(criterion.keywords))
+            if extras:
+                lines.append(f"   [dim]{escape(' · '.join(extras))}[/]")
+            for reason in unmet_reasons.get(criterion.id, []):
                 lines.append(f"   [red]{escape(reason)}[/]")
         for reason in general:
             lines.append(f"[red]{escape(reason)}[/]")

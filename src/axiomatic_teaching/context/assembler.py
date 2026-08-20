@@ -27,19 +27,25 @@ from axiomatic_teaching.models import (
     Criterion,
     DueReview,
     Lesson,
+    LessonStatus,
     StyleNote,
 )
 
 T = TypeVar("T")
 
 
-def assemble(repository: Repository, lesson: Lesson) -> str:
+def assemble(
+    repository: Repository,
+    lesson: Lesson,
+    budget: int = CONTEXT_CHAR_BUDGET,
+) -> str:
     """Build `_meta.rules` markdown.
 
     Current lesson criteria are never truncated. Optional sections shrink in
-    this order until ``CONTEXT_CHAR_BUDGET`` is met: related descriptions,
+    this order until ``budget`` is met: related descriptions,
     then style notes, then relations.
     """
+    cap = budget if budget > 0 else CONTEXT_CHAR_BUDGET
     pedagogy = PEDAGOGY_RULES.strip()
     criteria = _criteria(repository, lesson)
     current_core = _format_current_lesson(lesson, criteria)
@@ -71,7 +77,7 @@ def assemble(repository: Repository, lesson: Lesson) -> str:
         return "\n\n".join(part for part in parts if part).strip() + "\n"
 
     text = render()
-    while len(text) > CONTEXT_CHAR_BUDGET:
+    while len(text) > cap:
         if desc_limit is None:
             desc_limit = 160
         elif desc_limit > 0:
@@ -88,18 +94,26 @@ def assemble(repository: Repository, lesson: Lesson) -> str:
             break
         text = render()
 
-    if len(text) > CONTEXT_CHAR_BUDGET:
-        text = _required_within_budget(pedagogy, current_core, mastery)
+    if len(text) > cap:
+        text = _required_within_budget(pedagogy, current_core, mastery, cap)
     return text
 
 
 def kickoff_prompt(lesson: Lesson) -> str:
-    """Short first user prompt: begin the lesson, read criteria, stay in ZPD."""
+    """Short first user prompt: one diagnostic question, then wait."""
+    if lesson.status == LessonStatus.COMPLETED:
+        return (
+            f"This lesson titled {lesson.title} is already banked. Restudy only: "
+            "do not call record_lesson_success. Start with one diagnostic question "
+            "at the edge of competence. The learner already sees the criteria — "
+            "do not recap them. Wait for their answer."
+        )
     return (
         f"Begin the lesson titled {lesson.title}. "
-        "Read the success criteria in your rules. "
-        "Stay in the zone of proximal development: tutor at the edge of competence, "
-        "do not lecture, and do not declare the lesson complete yourself."
+        "Start with one diagnostic question at the edge of competence. "
+        "The learner already sees the success criteria — do not recap them. "
+        "Wait for their answer before teaching. Do not lecture. "
+        "Do not declare the lesson complete yourself."
     )
 
 
@@ -126,8 +140,8 @@ def _format_current_lesson(lesson: Lesson, criteria: list[Criterion]) -> str:
         "## Current lesson",
         f"- **Title:** {lesson.title}",
         f"- **Topic:** {lesson.topic}",
-        f"- **Description:** {lesson.description}",
-        f"- **Success description:** {lesson.success_description}",
+        f"- **Description:** {_truncate(lesson.description, 240)}",
+        f"- **Success description:** {_truncate(lesson.success_description, 240)}",
         "",
         "### Success criteria",
     ]
@@ -230,17 +244,19 @@ def _format_due_reviews(reviews: list[DueReview]) -> str:
     return "\n".join(lines)
 
 
-def _required_within_budget(pedagogy: str, current_core: str, mastery: str) -> str:
+def _required_within_budget(
+    pedagogy: str, current_core: str, mastery: str, budget: int = CONTEXT_CHAR_BUDGET
+) -> str:
     """Fit required sections under the budget without cutting criteria."""
     required_parts = [part for part in (pedagogy, current_core, mastery) if part]
     required = "\n\n".join(required_parts).strip()
-    if len(required) + 1 <= CONTEXT_CHAR_BUDGET:
+    if len(required) + 1 <= budget:
         return required + "\n"
     without_mastery = "\n\n".join(part for part in (pedagogy, current_core) if part).strip()
-    if len(without_mastery) + 1 <= CONTEXT_CHAR_BUDGET:
+    if len(without_mastery) + 1 <= budget:
         return without_mastery + "\n"
     overhead = len(current_core) + 2  # blank line between pedagogy and current
-    room = CONTEXT_CHAR_BUDGET - overhead - 1
+    room = budget - overhead - 1
     if room > 0:
         clipped = pedagogy[:room].rstrip()
         return f"{clipped}\n\n{current_core}\n"

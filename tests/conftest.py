@@ -19,11 +19,4 @@ def repository(db_path: Path):
     except ImportError:
         pytest.skip("create_repository is not implemented yet")
 
-    try:
-        from axiomatic_teaching.db.engine import init_engine
-    except ImportError:
-        init_engine = None
-    if init_engine is not None:
-        init_engine(db_path)
-
     return create_repository(db_path)

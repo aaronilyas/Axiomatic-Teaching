@@ -34,6 +34,11 @@ class ACPEvent(Message):
         self.payload = payload
 
 
+# Textual's camel_to_snake("ACPEvent") is "acpevent" (no aA boundary in the acronym).
+# Pin the handler so App.on_acp_event is actually dispatched.
+ACPEvent.handler_name = "on_acp_event"
+
+
 def invoke_flexible(fn: Callable[..., T], available: Mapping[str, Any]) -> T:
     """Call ``fn`` binding arguments by name from ``available``."""
     try:
@@ -106,44 +111,60 @@ def parse_gate_result(payload: object) -> GateResult | None:
         return None
     if isinstance(payload, GateResult):
         return payload
-    candidates: list[object] = [payload]
-    if isinstance(payload, dict):
-        for key in (
-            "result",
-            "gate",
-            "output",
-            "data",
-            "structuredContent",
-            "content",
-            "text",
-            "OkayOutput",
-        ):
-            if key in payload:
-                candidates.append(payload[key])
-        nested = payload.get("output")
-        if isinstance(nested, dict) and "OkayOutput" in nested:
-            candidates.append(nested["OkayOutput"])
+    return _parse_gate_result(payload, depth=0)
+
+
+def _parse_gate_result(payload: object, depth: int) -> GateResult | None:
+    if depth > 6 or payload is None:
+        return None
+    if isinstance(payload, GateResult):
+        return payload
+    if isinstance(payload, str):
+        text = payload.strip()
+        if not text:
+            return None
+        if text.startswith("```"):
+            lines = text.splitlines()
+            inner = "\n".join(line for line in lines if not line.strip().startswith("```"))
+            text = inner.strip() or text
+        try:
+            return GateResult.model_validate_json(text)
+        except Exception:
+            return None
+    if isinstance(payload, list):
+        for item in payload:
+            parsed = _parse_gate_result(item, depth + 1)
+            if parsed is not None:
+                return parsed
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if "accepted" in payload and "lesson_id" in payload:
+        try:
+            return GateResult.model_validate(payload)
+        except Exception:
+            pass
+    candidates: list[object] = []
+    for key in (
+        "result",
+        "gate",
+        "output",
+        "data",
+        "structuredContent",
+        "structured_content",
+        "content",
+        "text",
+        "OkayOutput",
+    ):
+        if key in payload:
+            candidates.append(payload[key])
+    nested = payload.get("output")
+    if isinstance(nested, dict) and "OkayOutput" in nested:
+        candidates.append(nested["OkayOutput"])
     for candidate in candidates:
-        if isinstance(candidate, GateResult):
-            return candidate
-        if isinstance(candidate, str):
-            text = candidate.strip()
-            if not text:
-                continue
-            try:
-                return GateResult.model_validate_json(text)
-            except Exception:
-                continue
-        if isinstance(candidate, dict) and "accepted" in candidate and "lesson_id" in candidate:
-            try:
-                return GateResult.model_validate(candidate)
-            except Exception:
-                continue
-        if isinstance(candidate, list):
-            for item in candidate:
-                parsed = parse_gate_result(item)
-                if parsed is not None:
-                    return parsed
+        parsed = _parse_gate_result(candidate, depth + 1)
+        if parsed is not None:
+            return parsed
     return None
 
 

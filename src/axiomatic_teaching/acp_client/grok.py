@@ -158,6 +158,7 @@ class GrokSession:
         self._conn: Any | None = None
         self._stderr: IO[bytes] | None = None
         self._prompt_lock = asyncio.Lock()
+        self._dead = False
         try:
             self._loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
         except RuntimeError:
@@ -171,7 +172,9 @@ class GrokSession:
     def session_id(self) -> str | None:
         return self._session_id
 
-    def _emit(self, event: Any) -> None:
+    def _emit(self, event: Any, *, force: bool = False) -> None:
+        if self._dead and not force:
+            return
         loop = self._loop
         try:
             running = asyncio.get_running_loop()
@@ -204,11 +207,16 @@ class GrokSession:
         async with self._prompt_lock:
             if self._process is not None or self._conn is not None:
                 await self._shutdown_unlocked()
-            await self._start_unlocked(lesson_id, rules, kickoff_prompt)
+            self._dead = False
+            try:
+                await self._start_unlocked(lesson_id, rules, kickoff_prompt)
+            except BaseException:
+                await self._shutdown_unlocked()
+                raise
 
     async def send(self, text: str) -> None:
         async with self._prompt_lock:
-            if self._conn is None or self._session_id is None:
+            if self._dead or self._conn is None or self._session_id is None:
                 raise RuntimeError("ACP session is not started")
             from acp import text_block
 
@@ -216,12 +224,13 @@ class GrokSession:
 
     async def cancel(self) -> None:
         conn, session_id = self._conn, self._session_id
-        if conn is None or session_id is None:
+        if conn is None or session_id is None or self._dead:
             return
         await conn.cancel(session_id=session_id)
 
     async def shutdown(self) -> None:
-        await self._shutdown_unlocked()
+        async with self._prompt_lock:
+            await self._shutdown_unlocked()
 
     async def _start_unlocked(self, lesson_id: str, rules: str, kickoff_prompt: str) -> None:
         from acp import PROTOCOL_VERSION, connect_to_agent, text_block
@@ -239,7 +248,8 @@ class GrokSession:
 
         log_path = self._settings.log_dir / _STDERR_LOG_NAME
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        stderr = log_path.open("ab")
+        rotate = log_path.exists() and log_path.stat().st_size > 2_000_000
+        stderr = log_path.open("wb" if rotate else "ab")
         self._stderr = stderr
 
         spawn_kwargs: dict[str, Any] = {
@@ -303,7 +313,6 @@ class GrokSession:
                     busy=False,
                 )
             )
-            await self._shutdown_unlocked()
             raise
 
     async def _prompt_unlocked(self, prompt: list[Any]) -> None:
@@ -323,12 +332,22 @@ class GrokSession:
             self._set_busy(False, "")
 
     async def _shutdown_unlocked(self) -> None:
+        if self._dead and self._conn is None and self._process is None:
+            return
         conn, session_id, busy = self._conn, self._session_id, self._busy
+        self._dead = True
         if busy and conn is not None and session_id is not None:
             try:
                 await conn.cancel(session_id=session_id)
             except Exception:
                 log.debug("session/cancel during shutdown failed", exc_info=True)
+        if conn is not None and session_id is not None:
+            close_session = getattr(conn, "close_session", None)
+            if callable(close_session):
+                try:
+                    await close_session(session_id=session_id)
+                except Exception:
+                    log.debug("session/close during shutdown failed", exc_info=True)
 
         if conn is not None:
             try:
@@ -341,13 +360,28 @@ class GrokSession:
         self._close_stderr()
         self._session_id = None
         self._busy = False
-        self._emit(AgentStatus(connected=False, message="shutdown", session_id=None, busy=False))
+        self._emit(
+            AgentStatus(connected=False, message="shutdown", session_id=None, busy=False),
+            force=True,
+        )
 
     async def _stop_process(self) -> None:
         proc = self._process
         self._process = None
         if proc is None or proc.returncode is not None:
             return
+        if proc.stdin is not None:
+            try:
+                proc.stdin.close()
+            except Exception:
+                log.debug("agent stdin close failed", exc_info=True)
+        if sys.platform == "win32":
+            await self._taskkill_tree(proc.pid)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=_SHUTDOWN_TIMEOUT)
+                return
+            except (asyncio.TimeoutError, ProcessLookupError):
+                pass
         try:
             proc.terminate()
         except ProcessLookupError:
@@ -367,6 +401,18 @@ class GrokSession:
             await asyncio.wait_for(proc.wait(), timeout=_SHUTDOWN_TIMEOUT)
         except (asyncio.TimeoutError, ProcessLookupError):
             log.warning("agent process did not exit after kill")
+
+    async def _taskkill_tree(self, pid: int) -> None:
+        try:
+            await asyncio.to_thread(
+                subprocess.run,
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=_SHUTDOWN_TIMEOUT,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception:
+            log.debug("taskkill /T failed for pid %s", pid, exc_info=True)
 
     def _close_stderr(self) -> None:
         handle = self._stderr

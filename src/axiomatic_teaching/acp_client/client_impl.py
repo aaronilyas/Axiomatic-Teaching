@@ -69,6 +69,21 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return {"value": value}
 
 
+def _prefer_allow(options: list[PermissionOption]) -> PermissionOption:
+    for option in options:
+        blob = " ".join(
+            str(part or "")
+            for part in (
+                getattr(option, "kind", None),
+                getattr(option, "name", None),
+                getattr(option, "option_id", None),
+            )
+        ).lower()
+        if "allow" in blob or "approve" in blob:
+            return option
+    return options[0]
+
+
 def _is_success_gate(
     title: str,
     kind: str,
@@ -126,8 +141,9 @@ class AxiomaticClient(Client):
         # Auto-allow so the TUI cannot deadlock even without --always-approve.
         if not options:
             return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
+        chosen = _prefer_allow(options)
         return RequestPermissionResponse(
-            outcome=AllowedOutcome(outcome="selected", option_id=options[0].option_id),
+            outcome=AllowedOutcome(outcome="selected", option_id=chosen.option_id),
         )
 
     async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:

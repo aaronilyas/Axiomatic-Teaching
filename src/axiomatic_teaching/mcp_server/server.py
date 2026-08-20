@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 from pathlib import Path
 from typing import Any
+
+from pydantic import ValidationError
 
 from axiomatic_teaching.db.repository import create_repository
 from axiomatic_teaching.db.sql_repository import SqlRepository
@@ -18,6 +21,9 @@ from axiomatic_teaching.models import (
 )
 from axiomatic_teaching.paths import default_db_path
 
+_REPO: SqlRepository | None = None
+_REPO_PATH: Path | None = None
+
 RECORD_LESSON_SUCCESS_DESCRIPTION = (
     "Bank this lesson's knowledge after the learner has met every required success "
     "criterion. Use criterion_id values from get_lesson_criteria; do not invent ids. "
@@ -28,9 +34,35 @@ RECORD_LESSON_SUCCESS_DESCRIPTION = (
 
 
 def _repository() -> SqlRepository:
+    global _REPO, _REPO_PATH
     raw = os.environ.get("AXIOMATIC_DB")
     path = Path(raw).expanduser() if raw else default_db_path()
-    return create_repository(path)
+    if _REPO is not None and _REPO_PATH == path:
+        return _REPO
+    if _REPO is not None:
+        try:
+            _REPO.dispose()
+        except Exception:
+            pass
+        _REPO = None
+    _REPO = create_repository(path)
+    _REPO_PATH = path
+    return _REPO
+
+
+def reset_repository_cache() -> None:
+    """Drop the cached repository (tests)."""
+    global _REPO, _REPO_PATH
+    if _REPO is not None:
+        try:
+            _REPO.dispose()
+        except Exception:
+            pass
+    _REPO = None
+    _REPO_PATH = None
+
+
+atexit.register(reset_repository_cache)
 
 
 def _current_lesson_id() -> str | None:
@@ -72,18 +104,38 @@ def record_lesson_success(
     current = _current_lesson_id()
     if current is not None and current != lesson_id:
         return _dump(_mismatch_result(lesson_id))
-    request = RecordSuccessRequest.model_validate(
-        {
-            "lesson_id": lesson_id,
-            "evidence": evidence,
-            "notes": notes,
-            "concepts": concepts or [],
-            "relations": relations or [],
-            "style_note": style_note,
-            "acp_session_id": acp_session_id,
-        }
-    )
-    result = _repository().record_success(request)
+    try:
+        request = RecordSuccessRequest.model_validate(
+            {
+                "lesson_id": lesson_id,
+                "evidence": evidence,
+                "notes": notes,
+                "concepts": concepts or [],
+                "relations": relations or [],
+                "style_note": style_note,
+                "acp_session_id": acp_session_id,
+            }
+        )
+    except ValidationError as exc:
+        return _dump(
+            GateResult(
+                accepted=False,
+                lesson_id=lesson_id,
+                unmet=[UnmetCriterion(reason="invalid record_lesson_success payload")],
+                message=str(exc),
+            )
+        )
+    try:
+        result = _repository().record_success(request)
+    except Exception as exc:  # noqa: BLE001 — MCP must return a structured gate result
+        return _dump(
+            GateResult(
+                accepted=False,
+                lesson_id=lesson_id,
+                unmet=[UnmetCriterion(reason="internal error while evaluating the gate")],
+                message=f"record_lesson_success failed: {exc}",
+            )
+        )
     return _dump(result)
 
 
@@ -117,10 +169,13 @@ def get_lesson_criteria() -> dict[str, Any]:
     }
 
 
-def list_banked_lessons() -> list[dict[str, Any]]:
-    """Return up to 20 banked lessons with id, title, and concept names."""
+def list_banked_lessons() -> dict[str, Any]:
+    """Return up to 20 banked lessons with id, title, and concept names.
+
+    Wrapped in an object so an empty bank is not serialized as a blank MCP string.
+    """
     summaries = _repository().list_banked_summaries()[:20]
-    return [
+    lessons = [
         {
             "id": item.id,
             "title": item.title,
@@ -130,6 +185,7 @@ def list_banked_lessons() -> list[dict[str, Any]]:
         }
         for item in summaries
     ]
+    return {"lessons": lessons, "count": len(lessons)}
 
 
 def get_connections() -> dict[str, Any]:

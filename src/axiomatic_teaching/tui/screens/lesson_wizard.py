@@ -64,6 +64,7 @@ class LessonWizard(Screen[Lesson | None]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+enter", "advance", "Next / Create", priority=True),
         Binding("question_mark", "app.help", "Help"),
     ]
 
@@ -90,7 +91,14 @@ class LessonWizard(Screen[Lesson | None]):
                 yield Input(id="field-text")
                 yield TextArea(id="field-long", show_line_numbers=False)
             with Vertical(id="step-criteria"):
-                yield Static("Each lesson needs ≥1 required criterion.", classes="muted")
+                yield Static(
+                    "Each lesson needs ≥1 required criterion. Keywords are the gate: "
+                    "evidence must contain every keyword (case-insensitive) and be at least "
+                    "N characters of the learner's own words. Kind guides the tutor; the "
+                    "gate ignores kind. Ctrl+Enter creates.",
+                    classes="muted",
+                    id="crit-help",
+                )
                 with Horizontal(id="criteria-editor"):
                     yield OptionList(id="crit-list", compact=True)
                     with Vertical(id="crit-form"):
@@ -132,6 +140,13 @@ class LessonWizard(Screen[Lesson | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def action_advance(self) -> None:
+        key = _STEPS[self._step][0]
+        if key == "criteria":
+            self._create()
+        else:
+            self._next()
 
     def _show_step(self) -> None:
         key, title, hint = _STEPS[self._step]

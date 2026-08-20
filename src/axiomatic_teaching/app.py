@@ -61,6 +61,14 @@ class AxiomaticApp(App[None]):
         self.refresh_counts()
         self.push_screen(HomeScreen())
 
+    def on_unmount(self) -> None:
+        dispose = getattr(self.repository, "dispose", None)
+        if callable(dispose):
+            try:
+                dispose()
+            except Exception:
+                pass
+
     def action_help(self) -> None:
         if isinstance(self.screen, HelpScreen):
             return
@@ -125,7 +133,11 @@ class AxiomaticApp(App[None]):
         except ImportError:
             return FALLBACK_RULES
         try:
-            result = assemble(self.repository, lesson)
+            result = assemble(
+                self.repository,
+                lesson,
+                budget=self.settings.context_char_budget,
+            )
         except TypeError:
             try:
                 result = invoke_flexible(
@@ -161,11 +173,18 @@ class AxiomaticApp(App[None]):
                     return text
             except Exception:
                 pass
+        if lesson.status.value == "completed":
+            return (
+                f"This lesson titled {lesson.title} is already banked. Restudy only: "
+                "do not call record_lesson_success. Start with one diagnostic question. "
+                "The learner already sees the criteria — do not recap them. Wait."
+            )
         return (
             f"Begin the lesson titled {lesson.title}. "
-            "Read the success criteria in your rules. "
-            "Stay in the zone of proximal development: tutor at the edge of competence, "
-            "do not lecture, and do not declare the lesson complete yourself."
+            "Start with one diagnostic question at the edge of competence. "
+            "The learner already sees the success criteria — do not recap them. "
+            "Wait for their answer before teaching. Do not lecture. "
+            "Do not declare the lesson complete yourself."
         )
 
     def list_lessons(self) -> list[Lesson]:

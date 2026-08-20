@@ -10,14 +10,18 @@ from axiomatic_teaching.app import AxiomaticApp
 from axiomatic_teaching.config import Settings
 from axiomatic_teaching.db.repository import create_repository
 from axiomatic_teaching.models import (
+    Criterion,
     CriterionDraft,
     CriterionKind,
     EvidenceItem,
+    GateResult,
     LessonStatus,
     NewLessonSpec,
     RecordSuccessRequest,
+    UnmetCriterion,
 )
 from axiomatic_teaching.tui import parse_gate_result
+from axiomatic_teaching.tui.widgets.criteria_panel import _mark
 from axiomatic_teaching.tui.screens.home import HomeScreen
 from axiomatic_teaching.tui.screens.knowledge import KnowledgeScreen
 from axiomatic_teaching.tui.screens.lesson_wizard import LessonWizard
@@ -78,6 +82,57 @@ async def test_home_then_wizard_creates_active_lesson(tmp_path: Path) -> None:
         assert lesson.status == LessonStatus.ACTIVE
         assert len(lesson.criteria) == 1
         assert lesson.criteria[0].required is True
+
+
+@pytest.mark.asyncio
+async def test_acp_events_reach_study_chat(tmp_path: Path) -> None:
+    from axiomatic_teaching.acp_client.events import StreamChunk, ToolCallEvent
+    from axiomatic_teaching.tui import ACPEvent
+
+    assert ACPEvent.handler_name == "on_acp_event"
+    app, repository = _app(tmp_path)
+    lesson = repository.create_lesson(
+        NewLessonSpec(
+            title="Queues",
+            topic="data-structures",
+            criteria=[
+                CriterionDraft(
+                    statement="Define a queue using FIFO.",
+                    required=True,
+                    keywords=["fifo"],
+                )
+            ],
+        )
+    )
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        app.dispatch_acp_event(StreamChunk(text="Hello from the tutor.", role="agent"))
+        await pilot.pause()
+        fail = GateResult(
+            accepted=False,
+            lesson_id=lesson.id,
+            unmet=[UnmetCriterion(criterion_id=None, reason="evidence list is empty")],
+            message="Success criteria were not met.",
+        )
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="t1",
+                title="record_lesson_success",
+                status="completed",
+                raw_output=fail.model_dump(mode="json"),
+                is_success_gate=True,
+            )
+        )
+        await pilot.pause()
+        chat = app.screen.query_one(ChatStream)
+        joined = "\n".join(str(line) for line in getattr(chat, "lines", []))
+        assert "Hello from the tutor" in joined
+        assert "GATE" in joined or "gate" in joined.lower()
+        body = str(app.screen.query_one("#criteria-body").render())
+        assert "Gate FAIL" in body
+        assert "✓" not in body
 
 
 @pytest.mark.asyncio
@@ -153,6 +208,67 @@ async def test_knowledge_shows_banked_evidence(tmp_path: Path) -> None:
         graph = str(app.screen.query_one("#graph-body").render())
         combined = evidence + graph
         assert "Big-O" in combined or "growth" in combined.lower() or "upper bound" in combined.lower()
+
+
+def test_criteria_mark_fail_is_not_all_green() -> None:
+    criterion = Criterion(
+        id="c1",
+        lesson_id="l1",
+        kind=CriterionKind.EXPLAIN,
+        statement="Explain it",
+        required=True,
+    )
+    fail = GateResult(
+        accepted=False,
+        lesson_id="l1",
+        unmet=[UnmetCriterion(criterion_id=None, reason="evidence list is empty")],
+        message="Success criteria were not met.",
+    )
+    assert "○" in _mark(criterion, fail)
+    assert "✓" not in _mark(criterion, fail)
+    unmet = GateResult(
+        accepted=False,
+        lesson_id="l1",
+        unmet=[UnmetCriterion(criterion_id="c1", reason="too short")],
+    )
+    assert "✗" in _mark(criterion, unmet)
+    passed = GateResult(accepted=True, lesson_id="l1")
+    assert "✓" in _mark(criterion, passed)
+
+
+def test_parse_gate_result_unwraps_mcp_content_array() -> None:
+    payload = {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    '{"accepted": true, "already_banked": false, '
+                    '"lesson_id": "xyz", "unmet": [], "completion_id": "c1", '
+                    '"message": "Lesson banked."}'
+                ),
+            }
+        ]
+    }
+    result = parse_gate_result(payload)
+    assert result is not None
+    assert result.accepted is True
+    assert result.lesson_id == "xyz"
+    assert result.completion_id == "c1"
+
+
+def test_parse_gate_result_unwraps_fenced_json() -> None:
+    payload = {
+        "text": (
+            "```json\n"
+            '{"accepted": false, "already_banked": false, '
+            '"lesson_id": "abc", "unmet": [], "message": "no"}\n'
+            "```"
+        )
+    }
+    result = parse_gate_result(payload)
+    assert result is not None
+    assert result.accepted is False
+    assert result.lesson_id == "abc"
 
 
 def test_parse_gate_result_unwraps_grok_mcp_envelope() -> None:

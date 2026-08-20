@@ -12,7 +12,7 @@ There is no “mark complete” button. Completions, concepts, style notes, and 
 
 ## Install
 
-Python 3.12+ (3.13 works). From the repository root:
+Python 3.12 or 3.13. From the repository root (use the same interpreter you will run):
 
 ```bash
 py -3.13 -m venv .venv
@@ -35,7 +35,7 @@ Optional flags:
 axiomatic-teach [--db PATH] [--demo] [--agent grok|echo] [--grok-bin PATH]
 ```
 
-`--demo` sets demo mode and forces `agent=echo` so the TUI starts without spawning Grok. If `grok` is missing and you are not in demo/echo mode, the CLI prints a warning; the TUI can still start and show that ACP is disconnected.
+`--demo` sets demo mode and forces the echo agent so the TUI starts without spawning Grok. The echo agent is for layout and keyboard practice only: it does **not** call `record_lesson_success` and cannot bank a lesson. If `grok` is missing and you are not in demo/echo mode, the CLI prints a warning; the TUI can still start and show that ACP is disconnected.
 
 Default SQLite path is `%LOCALAPPDATA%\AxiomaticTeaching\axiomatic.db` on Windows, or `$XDG_DATA_HOME/AxiomaticTeaching/axiomatic.db` (else `~/.local/share/AxiomaticTeaching/axiomatic.db`) on Unix. Override with `--db` or `AXIOMATIC_DB`.
 
@@ -55,9 +55,9 @@ Completed criteria are frozen. The TUI does not bank a lesson; only `record_less
 From Home, select an active lesson and press Enter or `s`.
 
 - The TUI starts an ACP session with Grok Build: `grok agent --always-approve stdio` (or the echo agent in `--demo`).
-- `session/new` attaches the axiomatic MCP server (stdio) and injects a small pedagogical context: current criteria, a few related **banked** lessons, 1-hop connections, style notes, and due reviews (hard-capped; current criteria are never truncated).
-- A short kickoff prompt starts the lesson. Subsequent input is `session/prompt`.
-- The center pane streams agent text, collapsible thoughts, and tool-call cards (`record_lesson_success` is highlighted). Criteria on the right update from the last gate result.
+- `session/new` attaches the axiomatic MCP server (stdio) and injects a small pedagogical context: current criteria, a few related **banked** lessons, 1-hop connections, style notes, and due reviews (hard-capped; current criteria are never truncated; long descriptions are capped).
+- A short kickoff prompt asks Grok for one diagnostic question and to wait. Subsequent input is `session/prompt`.
+- The center pane streams agent text, dim thought lines, and tool-call cards (`record_lesson_success` is highlighted). Criteria on the right show min-chars/keywords and update from the last gate result. A failed gate marks unmet rows ✗ and leaves the rest pending (○), never all-green.
 
 Session working directory is a per-lesson folder under the app data dir (`lessons/<id>/`), not this repository.
 
@@ -76,9 +76,13 @@ This MCP tool is the only writer of banked knowledge. Grok must pass `criterion_
 - Unknown `criterion_id`s are ignored (not a failure) and do not satisfy anything.
 - Empty evidence fails.
 
-**On pass** (one SQLite transaction): insert the completion, mark the lesson `completed`, upsert proposed concepts/relations, insert a style note if non-empty, and create an FSRS card. **On fail:** return structured `unmet` reasons and write **no** completion, concepts, or style notes.
+**On pass** (one SQLite transaction): insert the completion, mark the lesson `completed`, upsert proposed concepts/relations, insert a style note if non-empty, and create an FSRS card. **On fail:** return structured `unmet` reasons and write **no** completion, concepts, or style notes. Lessons cannot be marked completed through any other write path (`save_lesson` is rejected).
 
-A second successful call returns `already_banked` and does not insert another completion.
+Review cards show the original criteria and a short evidence snippet so rating is retrieval, not a title click.
+
+A second successful call returns `already_banked` and does not insert another completion. Concurrent double-calls serialize on SQLite and also return `already_banked` rather than erroring.
+
+The gate checks the evidence payload against the stored criteria. It cannot prove that the text was spoken by the learner — that honesty rule is in the pedagogy injected into Grok. Short or keyword-missing payloads are still rejected, including over a live Grok ACP session.
 
 Read-only companion tools: `get_lesson_criteria`, `list_banked_lessons`, `get_connections`. Learners never invoke these; Grok does, through the TUI session.
 
@@ -114,8 +118,9 @@ python scripts/verify_critical_path.py
 | `?` | Help |
 | `q` | Quit |
 | Ctrl+S | Study: send input |
+| Ctrl+Enter | Wizard: next step / create lesson |
 | Ctrl+C | Study: cancel the in-flight ACP turn |
-| Ctrl+Q | Quit with clean ACP shutdown |
+| Ctrl+Q / q | Quit (study unmount shuts the ACP child down, including the Windows process tree) |
 | Esc | Study: back (shuts down the session) |
 
 ## License

@@ -106,7 +106,7 @@ def verify(db_path: str | Path | None = None) -> int:
     Returns 0 on PASS, 1 on FAIL. No TUI, no Grok.
     """
     tmp: tempfile.TemporaryDirectory[str] | None = None
-    engine: Any = None
+    repository: Any = None
     path = Path(db_path) if db_path is not None else None
     try:
         if path is None:
@@ -126,13 +126,6 @@ def verify(db_path: str | Path | None = None) -> int:
                 f"({exc}). The SQLite repository is not available."
             ) from exc
 
-        try:
-            from axiomatic_teaching.db.engine import init_engine
-        except ImportError:
-            init_engine = None
-        if init_engine is not None:
-            engine = init_engine(path)
-
         repository = create_repository(path)
         _run_critical_path(repository)
         print("PASS: critical path (reject insufficient evidence, bank sufficient, already_banked)")
@@ -145,8 +138,8 @@ def verify(db_path: str | Path | None = None) -> int:
         traceback.print_exc()
         return 1
     finally:
-        if engine is not None:
-            dispose = getattr(engine, "dispose", None)
+        if repository is not None:
+            dispose = getattr(repository, "dispose", None)
             if callable(dispose):
                 try:
                     dispose()
@@ -297,13 +290,6 @@ def _run_app(settings: Settings) -> int:
             file=sys.stderr,
         )
         return 1
-
-    try:
-        from axiomatic_teaching.db.engine import init_engine
-    except ImportError:
-        init_engine = None
-    if init_engine is not None:
-        init_engine(settings.db_path)
 
     repository = create_repository(settings.db_path)
     session_factory = _build_session_factory(settings)

@@ -11,6 +11,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Static
 
+from rich.markup import escape
+
 from axiomatic_teaching.models import DueReview, Rating
 from axiomatic_teaching.tui import format_dt
 from axiomatic_teaching.tui.widgets.status_bar import StatusBar
@@ -87,12 +89,48 @@ class ReviewScreen(Screen[None]):
         buttons.display = True
         heading.update(f"Review  [dim]{remaining} due[/]")
         scheduler = "FSRS" if self._scheduler() is not None else "display only"
-        body.update(
-            f"[bold]{current.title}[/]\n"
-            f"[dim]{current.topic}[/]\n"
-            f"due {format_dt(current.due)}\n\n"
-            f"[dim]Rate this card · scheduler: {scheduler}[/]"
-        )
+        body.update(self._card_text(current, remaining, scheduler))
+
+    def _card_text(self, current: DueReview, remaining: int, scheduler: str) -> str:
+        lines = [
+            f"[bold]{escape(current.title)}[/]",
+            f"[dim]{escape(current.topic)} · due {format_dt(current.due)}[/]",
+            "",
+            "[bold]Recall first[/] [dim]then rate[/]",
+        ]
+        lesson = None
+        try:
+            lesson = self.app.repository.get_lesson(current.lesson_id)
+        except Exception:
+            lesson = None
+        if lesson is not None and lesson.criteria:
+            lines.append("")
+            lines.append("[bold]Criteria[/]")
+            for criterion in lesson.criteria:
+                req = "req" if criterion.required else "opt"
+                lines.append(f"• [{criterion.kind}/{req}] {escape(criterion.statement)}")
+        completion = None
+        try:
+            completion = self.app.repository.get_completion(current.lesson_id)
+        except Exception:
+            completion = None
+        if completion is not None:
+            evidence = completion.evidence
+            snippets: list[str] = []
+            if isinstance(evidence, dict):
+                for key, value in evidence.items():
+                    if isinstance(value, dict) and value.get("text"):
+                        snippets.append(str(value["text"]))
+                    elif key != "items":
+                        snippets.append(str(value))
+            for snippet in snippets[:3]:
+                text = snippet.strip().replace("\n", " ")
+                if len(text) > 220:
+                    text = text[:217] + "..."
+                lines.append(f"[dim]evidence:[/] {escape(text)}")
+        lines.append("")
+        lines.append(f"[dim]Rate this recall · scheduler: {scheduler} · {remaining} due[/]")
+        return "\n".join(lines)
 
     def _scheduler(self) -> Any | None:
         if self._fsrs_tried:

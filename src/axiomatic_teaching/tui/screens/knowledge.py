@@ -13,7 +13,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header, OptionList, Static
 from textual.widgets.option_list import Option
 
-from axiomatic_teaching.models import BankedLessonSummary, Completion, Concept
+from axiomatic_teaching.models import BankedLessonSummary, Completion, Concept, Criterion
 from axiomatic_teaching.tui import format_dt, format_relation
 from axiomatic_teaching.tui.widgets.status_bar import StatusBar
 
@@ -93,6 +93,13 @@ class KnowledgeScreen(Screen[None]):
         self._select_id = lesson_id
         summary = self._banked.get(lesson_id)
         completion: Completion | None = None
+        criteria = []
+        try:
+            lesson = self.app.repository.get_lesson(lesson_id)
+            if lesson is not None:
+                criteria = list(lesson.criteria)
+        except Exception:
+            criteria = []
         try:
             completion = self.app.repository.get_completion(lesson_id)
         except Exception as exc:
@@ -101,7 +108,7 @@ class KnowledgeScreen(Screen[None]):
             )
         else:
             self.query_one("#evidence-body", Static).update(
-                _format_evidence(summary, completion)
+                _format_evidence(summary, completion, criteria)
             )
         self._render_graph(lesson_id)
 
@@ -145,6 +152,7 @@ class KnowledgeScreen(Screen[None]):
 def _format_evidence(
     summary: BankedLessonSummary | None,
     completion: Completion | None,
+    criteria: list[Criterion] | None = None,
 ) -> str:
     lines: list[str] = []
     if summary is not None:
@@ -155,6 +163,12 @@ def _format_evidence(
             lines.append(f"[dim]banked {format_dt(summary.completed_at)}[/]")
         if summary.concepts:
             lines.append("[dim]concepts: " + ", ".join(summary.concepts) + "[/]")
+        lines.append("")
+    if criteria:
+        lines.append("[bold]Criteria[/]")
+        for criterion in criteria:
+            req = "req" if criterion.required else "opt"
+            lines.append(f"• [{criterion.kind}/{req}] {criterion.statement}")
         lines.append("")
     if completion is None:
         lines.append("[dim]No stored evidence.[/]")

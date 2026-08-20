@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from axiomatic_teaching.db.engine import init_engine, session_scope
+from axiomatic_teaching.db.engine import dispose_engine, init_engine, session_scope
 from axiomatic_teaching.db.orm import (
     AcpSessionRow,
     CompletionRow,
@@ -164,6 +165,9 @@ class SqlRepository:
         self.db_path = Path(db_path)
         self.engine = init_engine(self.db_path)
 
+    def dispose(self) -> None:
+        dispose_engine(self.engine)
+
     def create_lesson(self, spec: NewLessonSpec) -> Lesson:
         if not any(c.required for c in spec.criteria):
             raise ValueError("at least one required criterion is required")
@@ -241,16 +245,27 @@ class SqlRepository:
 
     def save_lesson(self, lesson: Lesson) -> Lesson:
         now = _utcnow()
+        if not any(c.required for c in lesson.criteria):
+            raise ValueError("at least one required criterion is required")
         with session_scope(self.engine) as session:
             row = session.get(LessonRow, lesson.id)
+            existing_status = row.status if row is not None else None
+            new_status = lesson.status.value
+            if (
+                new_status == LessonStatus.COMPLETED.value
+                and existing_status != LessonStatus.COMPLETED.value
+            ):
+                raise ValueError("lessons can only be completed via record_success")
             if row is None:
+                if new_status == LessonStatus.COMPLETED.value:
+                    raise ValueError("lessons can only be completed via record_success")
                 row = LessonRow(
                     id=lesson.id,
                     title=lesson.title,
                     topic=lesson.topic,
                     description=lesson.description,
                     success_description=lesson.success_description,
-                    status=lesson.status.value,
+                    status=new_status,
                     tags_json=_dumps(list(lesson.tags)),
                     created_at=lesson.created_at,
                     updated_at=now,
@@ -263,28 +278,48 @@ class SqlRepository:
                 row.topic = lesson.topic
                 row.description = lesson.description
                 row.success_description = lesson.success_description
-                row.status = lesson.status.value
+                row.status = new_status
                 row.tags_json = _dumps(list(lesson.tags))
                 row.updated_at = now
-                row.completed_at = lesson.completed_at
+                if existing_status == LessonStatus.COMPLETED.value:
+                    # Keep completion metadata; title/topic/tags may still be edited.
+                    row.completed_at = row.completed_at or lesson.completed_at
+                else:
+                    row.completed_at = lesson.completed_at
                 row.last_session_id = lesson.last_session_id
-            session.execute(
-                delete(SuccessCriterionRow).where(SuccessCriterionRow.lesson_id == lesson.id)
-            )
+            incoming_ids = {c.id for c in lesson.criteria if c.id}
+            existing_rows = session.scalars(
+                select(SuccessCriterionRow).where(SuccessCriterionRow.lesson_id == lesson.id)
+            ).all()
+            for old in existing_rows:
+                if old.id not in incoming_ids:
+                    session.delete(old)
             session.flush()
             for criterion in lesson.criteria:
-                session.add(
-                    SuccessCriterionRow(
-                        id=criterion.id or _new_id(),
-                        lesson_id=lesson.id,
-                        kind=criterion.kind.value,
-                        statement=criterion.statement,
-                        required=criterion.required,
-                        min_evidence_chars=criterion.min_evidence_chars,
-                        keywords_json=_dumps(list(criterion.keywords)),
-                        sort_order=criterion.sort_order,
+                cid = criterion.id or _new_id()
+                crit_row = session.get(SuccessCriterionRow, cid)
+                if crit_row is None:
+                    session.add(
+                        SuccessCriterionRow(
+                            id=cid,
+                            lesson_id=lesson.id,
+                            kind=criterion.kind.value,
+                            statement=criterion.statement,
+                            required=criterion.required,
+                            min_evidence_chars=criterion.min_evidence_chars,
+                            keywords_json=_dumps(list(criterion.keywords)),
+                            sort_order=criterion.sort_order,
+                        )
                     )
-                )
+                else:
+                    if crit_row.lesson_id != lesson.id:
+                        raise ValueError(f"criterion {cid} belongs to another lesson")
+                    crit_row.kind = criterion.kind.value
+                    crit_row.statement = criterion.statement
+                    crit_row.required = criterion.required
+                    crit_row.min_evidence_chars = criterion.min_evidence_chars
+                    crit_row.keywords_json = _dumps(list(criterion.keywords))
+                    crit_row.sort_order = criterion.sort_order
             session.flush()
             session.expire(row, ["criteria"])
             loaded = session.scalar(
@@ -320,18 +355,35 @@ class SqlRepository:
                     message="Lesson not found.",
                 )
 
-            lesson = _lesson_to_model(lesson_row)
-            result = evaluate(lesson, request)
-
             existing = session.scalar(
                 select(CompletionRow).where(CompletionRow.lesson_id == request.lesson_id)
             )
             if existing is not None:
-                result.accepted = True
-                result.already_banked = True
-                result.unmet = []
-                result.completion_id = existing.id
-                result.message = "Lesson already banked."
+                result = GateResult(
+                    accepted=True,
+                    already_banked=True,
+                    lesson_id=request.lesson_id,
+                    unmet=[],
+                    completion_id=existing.id,
+                    message="Lesson already banked.",
+                )
+                session.add(
+                    GateAttemptRow(
+                        id=_new_id(),
+                        lesson_id=request.lesson_id,
+                        accepted=True,
+                        payload_json=request.model_dump_json(),
+                        result_json=result.model_dump_json(),
+                        created_at=_utcnow(),
+                    )
+                )
+                return result
+
+            lesson = _lesson_to_model(lesson_row)
+            if lesson.status == LessonStatus.COMPLETED:
+                # Status flag without a completion row is inconsistent; allow a real bank.
+                lesson = lesson.model_copy(update={"status": LessonStatus.ACTIVE})
+            result = evaluate(lesson, request)
 
             attempt = GateAttemptRow(
                 id=_new_id(),
@@ -343,27 +395,49 @@ class SqlRepository:
             )
             session.add(attempt)
 
-            if result.already_banked or not result.accepted:
+            if not result.accepted:
                 return result
 
             now = _utcnow()
             completion_id = _new_id()
             evidence_payload = {
-                item.criterion_id: {"text": item.text, "met": item.met}
+                item.criterion_id: {
+                    "text": item.text[:20_000],
+                    "met": item.met,
+                }
                 for item in request.evidence
+                if item.criterion_id in {c.id for c in lesson.criteria}
             }
-            session.add(
-                CompletionRow(
-                    id=completion_id,
-                    lesson_id=request.lesson_id,
-                    evidence_json=_dumps(evidence_payload),
-                    notes=request.notes,
-                    unmet_json=_dumps([u.model_dump(mode="json") for u in result.unmet]),
-                    recorded_at=now,
-                    acp_session_id=request.acp_session_id,
-                    source="record_lesson_success",
+            try:
+                with session.begin_nested():
+                    session.add(
+                        CompletionRow(
+                            id=completion_id,
+                            lesson_id=request.lesson_id,
+                            evidence_json=_dumps(evidence_payload),
+                            notes=request.notes,
+                            unmet_json=_dumps(
+                                [u.model_dump(mode="json") for u in result.unmet]
+                            ),
+                            recorded_at=now,
+                            acp_session_id=request.acp_session_id,
+                            source="record_lesson_success",
+                        )
+                    )
+                    session.flush()
+            except IntegrityError:
+                raced = session.scalar(
+                    select(CompletionRow).where(CompletionRow.lesson_id == request.lesson_id)
                 )
-            )
+                result.accepted = True
+                result.already_banked = True
+                result.unmet = []
+                result.completion_id = raced.id if raced is not None else None
+                result.message = "Lesson already banked."
+                attempt.accepted = True
+                attempt.result_json = result.model_dump_json()
+                return result
+
             lesson_row.status = LessonStatus.COMPLETED.value
             lesson_row.completed_at = now
             lesson_row.updated_at = now
@@ -376,7 +450,7 @@ class SqlRepository:
                     StyleNoteRow(
                         id=_new_id(),
                         lesson_id=request.lesson_id,
-                        note=note,
+                        note=note[:4000],
                         created_at=now,
                     )
                 )

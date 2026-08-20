@@ -13,6 +13,7 @@ authors = [{ name = "Axiomatic Teaching" }]
 keywords = ["tui", "education", "grok", "acp", "fsrs"]
 classifiers = [
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Environment :: Console",
     "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
 ]

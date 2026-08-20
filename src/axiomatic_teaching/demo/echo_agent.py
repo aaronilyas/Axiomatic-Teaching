@@ -1,4 +1,4 @@
-"""Minimal ACP agent that echoes the user and emits a fake success-gate tool call."""
+"""Minimal ACP agent for --demo. Echoes the user with a Socratic probe; does not bank."""
 
 from __future__ import annotations
 
@@ -13,9 +13,7 @@ from acp import (
     PromptResponse,
     PROTOCOL_VERSION,
     run_agent,
-    start_tool_call,
     update_agent_message_text,
-    update_tool_call,
 )
 from acp.interfaces import Client
 from acp.schema import (
@@ -31,7 +29,10 @@ from acp.schema import (
     TextContentBlock,
 )
 
-_TUTOR_REPLY = "Got it. Let's keep going — try restating the key idea in your own words."
+_TUTOR_REPLY = (
+    "Demo agent (no Grok). I cannot bank a lesson — only record_lesson_success "
+    "against real Grok Build can. What is the core idea in your own words?"
+)
 
 
 def _block_text(block: Any) -> str:
@@ -77,7 +78,7 @@ class EchoAgent(Agent):
         **kwargs: Any,
     ) -> PromptResponse:
         user_text = "\n".join(text for block in prompt if (text := _block_text(block)))
-        echo = user_text or "(empty)"
+        echo = user_text.strip() or "(empty)"
         await self._conn.session_update(
             session_id=session_id,
             update=update_agent_message_text(echo),
@@ -85,27 +86,6 @@ class EchoAgent(Agent):
         await self._conn.session_update(
             session_id=session_id,
             update=update_agent_message_text(_TUTOR_REPLY),
-        )
-        tool_call_id = f"echo-success-{uuid4().hex[:8]}"
-        await self._conn.session_update(
-            session_id=session_id,
-            update=start_tool_call(
-                tool_call_id,
-                "record_lesson_success",
-                kind="other",
-                status="pending",
-                raw_input={"name": "record_lesson_success"},
-            ),
-        )
-        await self._conn.session_update(
-            session_id=session_id,
-            update=update_tool_call(
-                tool_call_id,
-                title="record_lesson_success",
-                kind="other",
-                status="completed",
-                raw_output={"ok": True},
-            ),
         )
         return PromptResponse(stop_reason="end_turn")
 

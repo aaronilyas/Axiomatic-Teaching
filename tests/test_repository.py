@@ -61,6 +61,21 @@ def test_create_lesson_assigns_uuids_and_active_status(tmp_path: Path) -> None:
     assert loaded.tags == ["t1"]
 
 
+def test_new_lesson_spec_rejects_empty_and_zero_min_chars() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        NewLessonSpec(title="A", topic="B", criteria=[])
+    with pytest.raises(ValidationError):
+        NewLessonSpec(
+            title="A",
+            topic="B",
+            criteria=[
+                CriterionDraft(statement="x", required=True, min_evidence_chars=0)
+            ],
+        )
+
+
 def test_create_lesson_requires_required_criterion(tmp_path: Path) -> None:
     repo = create_repository(tmp_path / "db.sqlite")
     with pytest.raises(ValueError, match="required criterion"):
@@ -206,6 +221,47 @@ def test_pass_path_writes_completion_graph_style_and_fsrs(tmp_path: Path) -> Non
     assert len(summaries) == 1
     assert summaries[0].id == lesson.id
     assert "Bayes" in summaries[0].concepts
+
+
+def test_save_lesson_cannot_mark_completed(tmp_path: Path) -> None:
+    repo = create_repository(tmp_path / "db.sqlite")
+    lesson = repo.create_lesson(_spec())
+    lesson.status = LessonStatus.COMPLETED
+    with pytest.raises(ValueError, match="record_success"):
+        repo.save_lesson(lesson)
+    loaded = repo.get_lesson(lesson.id)
+    assert loaded is not None
+    assert loaded.status == LessonStatus.ACTIVE
+    assert repo.get_completion(lesson.id) is None
+
+
+def test_save_lesson_preserves_criterion_ids(tmp_path: Path) -> None:
+    repo = create_repository(tmp_path / "db.sqlite")
+    lesson = repo.create_lesson(_spec())
+    original_id = lesson.criteria[0].id
+    lesson.title = "Renamed"
+    saved = repo.save_lesson(lesson)
+    assert saved.criteria[0].id == original_id
+    assert repo.list_criteria(lesson.id)[0].id == original_id
+
+
+def test_inconsistent_completed_status_still_banks(tmp_path: Path) -> None:
+    repo = create_repository(tmp_path / "db.sqlite")
+    lesson = repo.create_lesson(_spec())
+    crit = lesson.criteria[0]
+    with session_scope(repo.engine) as session:
+        row = session.get(LessonRow, lesson.id)
+        assert row is not None
+        row.status = LessonStatus.COMPLETED.value
+    result = repo.record_success(
+        RecordSuccessRequest(
+            lesson_id=lesson.id,
+            evidence=[EvidenceItem(criterion_id=crit.id, text=PASSING_TEXT, met=True)],
+        )
+    )
+    assert result.accepted is True
+    assert result.already_banked is False
+    assert repo.get_completion(lesson.id) is not None
 
 
 def test_empty_style_note_not_inserted_on_pass(tmp_path: Path) -> None:

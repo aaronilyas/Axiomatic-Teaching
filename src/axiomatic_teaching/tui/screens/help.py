@@ -36,6 +36,8 @@ _HELP = """[bold]Home[/]
 
 [bold]Lesson wizard[/]
   Cannot skip success criteria. Need ≥1 required criterion.
+  Keywords + min chars are the gate; kind is a tutor hint.
+  [cyan]ctrl+enter[/] next / create
   [cyan]esc[/]        cancel
 
 [bold]Study[/]
@@ -43,6 +45,7 @@ _HELP = """[bold]Home[/]
   [cyan]ctrl+c[/]     cancel turn
   [cyan]esc[/]        back (shutdown session)
   Completion is only via the [cyan]record_lesson_success[/] gate.
+  Demo mode cannot bank; use Grok Build for the live gate.
 
 [bold]Review[/]
   [cyan]1[/]/[cyan]a[/]        again

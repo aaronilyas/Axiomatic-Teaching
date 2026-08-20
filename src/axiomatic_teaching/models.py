@@ -214,6 +214,13 @@ class CriterionDraft(BaseModel):
             raise ValueError("criterion statement must not be empty")
         return text
 
+    @field_validator("min_evidence_chars")
+    @classmethod
+    def min_chars_positive(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("min_evidence_chars must be >= 1")
+        return value
+
 
 class NewLessonSpec(BaseModel):
     title: str
@@ -222,3 +229,18 @@ class NewLessonSpec(BaseModel):
     success_description: str = ""
     tags: list[str] = Field(default_factory=list)
     criteria: list[CriterionDraft]
+
+    @field_validator("title", "topic")
+    @classmethod
+    def required_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+    @field_validator("criteria")
+    @classmethod
+    def at_least_one_required(cls, value: list[CriterionDraft]) -> list[CriterionDraft]:
+        if not any(item.required for item in value):
+            raise ValueError("at least one required criterion is required")
+        return value

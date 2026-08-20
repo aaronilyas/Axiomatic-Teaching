@@ -370,6 +370,26 @@ def test_kickoff_prompt_mentions_title() -> None:
     repo = FakeRepository()
     prompt = kickoff_prompt(repo.current)
     assert CURRENT_TITLE in prompt
+    assert "diagnostic question" in prompt
+    assert "already sees" in prompt
+
+
+def test_kickoff_prompt_restudy_for_completed() -> None:
+    repo = FakeRepository()
+    completed = repo.lessons["c1"]
+    prompt = kickoff_prompt(completed)
+    assert "already banked" in prompt
+    assert "record_lesson_success" in prompt
+
+
+def test_current_description_is_truncated() -> None:
+    repo = FakeRepository()
+    repo.current.description = "D" * 800
+    repo.current.success_description = "S" * 800
+    text = assemble(repo, repo.current)
+    assert "D" * 241 not in text
+    assert "S" * 241 not in text
+    assert CRITERION_STATEMENT in text
 
 
 def test_assemble_survives_empty_repository_methods() -> None:

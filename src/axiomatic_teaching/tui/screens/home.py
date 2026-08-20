@@ -163,4 +163,6 @@ class HomeScreen(Screen[None]):
         if lesson.status == LessonStatus.ARCHIVED:
             self.notify("Archived lessons cannot be studied.", severity="warning")
             return
+        if lesson.status == LessonStatus.COMPLETED:
+            self.notify("Already banked — restudy only; the gate will not re-bank.")
         self.app.push_screen(StudyScreen(lesson))
