@@ -1,4 +1,4 @@
-"""Study session: chat with Grok through ACP, criteria, connections."""
+"""Study session: chat with Grok through ACP, success criterion, connections."""
 
 from __future__ import annotations
 

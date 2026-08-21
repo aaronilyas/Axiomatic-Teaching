@@ -36,7 +36,7 @@ _HELP = """[bold]Home[/]
 
 [bold]New lesson[/]
   Title and topic required. Success description optional (1–2 sentences).
-  A single criterion is derived automatically; there is no criteria editor.
+  A single criterion is derived automatically from that text (or a default).
   [cyan]ctrl+enter[/] create
   [cyan]esc[/]        cancel
 

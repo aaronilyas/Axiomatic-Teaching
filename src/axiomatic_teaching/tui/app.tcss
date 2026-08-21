@@ -47,13 +47,13 @@ Button {
     height: 3;
 }
 
-Input, Select, TextArea {
+Input, TextArea {
     background: #080b0f;
     color: #eef3f8;
     border: tall #2a3b4c;
 }
 
-Input:focus, Select:focus, TextArea:focus {
+Input:focus, TextArea:focus {
     border: tall #7ee0ff;
 }
 
@@ -151,7 +151,7 @@ CriteriaPanel, ConnectionsPanel {
     padding: 1 2;
 }
 
-#wizard-step-label {
+#wizard-title {
     height: 1;
 }
 

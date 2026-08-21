@@ -1,7 +1,8 @@
-"""Textual Pilot tests: wizard create → study shows criteria → knowledge after bank."""
+"""Textual Pilot tests: new-lesson form → study shows criterion → knowledge after bank."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -15,13 +16,14 @@ from axiomatic_teaching.models import (
     CriterionKind,
     EvidenceItem,
     GateResult,
+    Lesson,
     LessonStatus,
     NewLessonSpec,
     RecordSuccessRequest,
     UnmetCriterion,
 )
 from axiomatic_teaching.tui import parse_gate_result
-from axiomatic_teaching.tui.widgets.criteria_panel import _mark
+from axiomatic_teaching.tui.widgets.criteria_panel import _format_panel, _mark
 from axiomatic_teaching.tui.screens.home import HomeScreen
 from axiomatic_teaching.tui.screens.knowledge import KnowledgeScreen
 from axiomatic_teaching.tui.screens.lesson_wizard import LessonWizard
@@ -51,9 +53,13 @@ async def test_home_then_wizard_creates_active_lesson(tmp_path: Path) -> None:
         assert list(screen.query("#crit-kind")) == []
         assert list(screen.query("#crit-statement")) == []
         assert list(screen.query("#wizard-next")) == []
+        assert list(screen.query("#wizard-step-label")) == []
         assert list(screen.query("#crit-required")) == []
         assert list(screen.query("#crit-min")) == []
         assert list(screen.query("#crit-keywords")) == []
+        assert screen.query_one("#wizard-title") is not None
+        help_text = str(screen.query_one("#success-help").render())
+        assert "criteria editor" not in help_text.lower()
 
         screen.query_one("#field-title").value = "Recursion"
         screen.query_one("#field-topic").value = "algorithms"
@@ -113,6 +119,7 @@ async def test_wizard_blank_success_then_study_and_gate(tmp_path: Path) -> None:
         assert isinstance(app.screen, StudyScreen)
         body = str(app.screen.query_one("#criteria-body").render())
         assert "core ideas" in body.lower() or "bayes" in body.lower()
+        assert "○ Gate" not in body
 
         too_short = repository.record_success(
             RecordSuccessRequest(
@@ -280,6 +287,83 @@ async def test_knowledge_shows_banked_evidence(tmp_path: Path) -> None:
         graph = str(app.screen.query_one("#graph-body").render())
         combined = evidence + graph
         assert "Big-O" in combined or "growth" in combined.lower() or "upper bound" in combined.lower()
+
+
+def test_format_panel_single_criterion_does_not_duplicate_description() -> None:
+    statement = "Explain recursion in your own words."
+    now = datetime.now(timezone.utc)
+    lesson = Lesson(
+        id="l1",
+        title="Recursion",
+        topic="algorithms",
+        success_description=statement,
+        created_at=now,
+        updated_at=now,
+        criteria=[
+            Criterion(
+                id="c1",
+                lesson_id="l1",
+                kind=CriterionKind.EXPLAIN,
+                statement=statement,
+                required=True,
+                min_evidence_chars=50,
+                keywords=["recursion"],
+            )
+        ],
+    )
+    body = _format_panel(lesson, None)
+    assert statement in body
+    assert body.count(statement) == 1
+    assert "min 50 chars" in body
+    assert "recursion" in body
+    assert "○ Gate" not in body
+
+
+def test_format_panel_legacy_multi_lists_each_statement() -> None:
+    now = datetime.now(timezone.utc)
+    lesson = Lesson(
+        id="l1",
+        title="Bayes",
+        topic="probability",
+        success_description="Master Bayes.",
+        created_at=now,
+        updated_at=now,
+        criteria=[
+            Criterion(
+                id="c1",
+                lesson_id="l1",
+                kind=CriterionKind.EXPLAIN,
+                statement="Explain Bayes",
+                required=True,
+                min_evidence_chars=40,
+                keywords=["prior"],
+                sort_order=0,
+            ),
+            Criterion(
+                id="c2",
+                lesson_id="l1",
+                kind=CriterionKind.APPLY,
+                statement="Compute a posterior",
+                required=True,
+                min_evidence_chars=40,
+                keywords=["posterior"],
+                sort_order=1,
+            ),
+        ],
+    )
+    body = _format_panel(lesson, None)
+    assert "Master Bayes." in body
+    assert "Explain Bayes" in body
+    assert "Compute a posterior" in body
+    fail = GateResult(
+        accepted=False,
+        lesson_id="l1",
+        unmet=[UnmetCriterion(criterion_id="c2", reason="too short")],
+    )
+    failed = _format_panel(lesson, fail)
+    assert "Gate FAIL" in failed
+    assert "✗" in failed
+    assert "too short" in failed
 
 
 def test_criteria_mark_fail_is_not_all_green() -> None:

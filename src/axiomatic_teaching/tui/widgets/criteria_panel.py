@@ -24,6 +24,70 @@ def _mark(criterion: Criterion, result: GateResult | None) -> str:
     return "[dim]○[/]"
 
 
+def _extras(criterion: Criterion) -> str:
+    parts: list[str] = []
+    if criterion.min_evidence_chars:
+        parts.append(f"min {criterion.min_evidence_chars} chars")
+    if criterion.keywords:
+        parts.append("keywords: " + ", ".join(criterion.keywords))
+    return " · ".join(parts)
+
+
+def _format_panel(lesson: Lesson | None, result: GateResult | None) -> str:
+    if lesson is None:
+        return "[dim]No lesson selected.[/]"
+    criteria = sorted(lesson.criteria, key=lambda item: (item.sort_order, item.id))
+    if not criteria:
+        return "[dim]This lesson has no success criterion.[/]"
+
+    lines: list[str] = []
+    description = (lesson.success_description or "").strip()
+    if description:
+        lines.append(escape(description))
+        lines.append("")
+
+    if result is not None:
+        if result.already_banked:
+            lines.append("[cyan]Already banked.[/]")
+        elif result.accepted:
+            lines.append("[green]Gate PASS[/]")
+        else:
+            lines.append("[red]Gate FAIL[/]")
+        if result.message:
+            lines.append(f"[dim]{escape(result.message)}[/]")
+        lines.append("")
+
+    unmet_reasons: dict[str, list[str]] = {}
+    general: list[str] = []
+    for item in result.unmet if result is not None else []:
+        if item.criterion_id:
+            unmet_reasons.setdefault(item.criterion_id, []).append(item.reason)
+        else:
+            general.append(item.reason)
+
+    # New lessons have one criterion; older rows may still have several.
+    single = len(criteria) == 1
+    for criterion in criteria:
+        mark = _mark(criterion, result)
+        statement = escape(criterion.statement)
+        extras = _extras(criterion)
+        description_covers = bool(description) and statement == escape(description)
+        if single and description_covers:
+            if extras:
+                lines.append(f"{mark} [dim]{escape(extras)}[/]")
+            else:
+                lines.append(mark)
+        else:
+            lines.append(f"{mark} {statement}")
+            if extras:
+                lines.append(f"   [dim]{escape(extras)}[/]")
+        for reason in unmet_reasons.get(criterion.id, []):
+            lines.append(f"   [red]{escape(reason)}[/]")
+    for reason in general:
+        lines.append(f"[red]{escape(reason)}[/]")
+    return "\n".join(lines)
+
+
 class CriteriaPanel(Vertical):
     DEFAULT_CSS = """
     CriteriaPanel {
@@ -60,51 +124,4 @@ class CriteriaPanel(Vertical):
             body = self.query_one("#criteria-body", Static)
         except Exception:
             return
-        lesson = self._lesson
-        if lesson is None:
-            body.update("[dim]No lesson selected.[/]")
-            return
-        criteria = list(lesson.criteria)
-        if not criteria:
-            body.update("[dim]This lesson has no success criterion.[/]")
-            return
-        lines: list[str] = []
-        if lesson.success_description:
-            lines.append(escape(lesson.success_description))
-            lines.append("")
-        if self._result is not None:
-            if self._result.already_banked:
-                lines.append("[cyan]Already banked.[/]")
-            elif self._result.accepted:
-                lines.append("[green]Gate PASS[/]")
-            else:
-                lines.append("[red]Gate FAIL[/]")
-            if self._result.message:
-                lines.append(f"[dim]{escape(self._result.message)}[/]")
-            lines.append("")
-        unmet_reasons: dict[str, list[str]] = {}
-        general: list[str] = []
-        for item in self._result.unmet if self._result is not None else []:
-            if item.criterion_id:
-                unmet_reasons.setdefault(item.criterion_id, []).append(item.reason)
-            else:
-                general.append(item.reason)
-        for criterion in sorted(criteria, key=lambda item: item.sort_order):
-            mark = _mark(criterion, self._result)
-            statement = escape(criterion.statement)
-            if lesson.success_description and statement == escape(lesson.success_description):
-                lines.append(f"{mark} Gate")
-            else:
-                lines.append(f"{mark} {statement}")
-            extras = []
-            if criterion.min_evidence_chars:
-                extras.append(f"min {criterion.min_evidence_chars} chars")
-            if criterion.keywords:
-                extras.append("keywords: " + ", ".join(criterion.keywords))
-            if extras:
-                lines.append(f"   [dim]{escape(' · '.join(extras))}[/]")
-            for reason in unmet_reasons.get(criterion.id, []):
-                lines.append(f"   [red]{escape(reason)}[/]")
-        for reason in general:
-            lines.append(f"[red]{escape(reason)}[/]")
-        body.update("\n".join(lines))
+        body.update(_format_panel(self._lesson, self._result))

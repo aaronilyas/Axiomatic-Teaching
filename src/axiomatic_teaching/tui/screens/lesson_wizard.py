@@ -31,7 +31,7 @@ class LessonWizard(Screen[Lesson | None]):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with VerticalScroll(id="wizard-card"):
-            yield Static("New lesson", id="wizard-step-label", classes="panel-title")
+            yield Static("New lesson", id="wizard-title", classes="panel-title")
             yield Static(
                 "Title and topic are required. Success is optional — one or two sentences.",
                 id="wizard-hint",
@@ -46,8 +46,7 @@ class LessonWizard(Screen[Lesson | None]):
             yield Static(
                 "Leave blank to use: "
                 f"{DEFAULT_SUCCESS_STATEMENT} "
-                "Keywords and a minimum length are derived automatically; "
-                "there is no criteria editor.",
+                "A single criterion is derived automatically (keywords and a minimum length).",
                 classes="muted",
                 id="success-help",
             )

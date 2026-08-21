@@ -41,7 +41,7 @@ def assemble(
 ) -> str:
     """Build `_meta.rules` markdown.
 
-    Current lesson criteria are never truncated. Optional sections shrink in
+    Current lesson criterion text is never truncated. Optional sections shrink in
     this order until ``budget`` is met: related descriptions,
     then style notes, then relations.
     """
@@ -143,7 +143,7 @@ def _format_current_lesson(lesson: Lesson, criteria: list[Criterion]) -> str:
         f"- **Description:** {_truncate(lesson.description, 240)}",
         f"- **Success description:** {_truncate(lesson.success_description, 240)}",
         "",
-        "### Success criterion",
+        "### Success criterion" if len(criteria) <= 1 else "### Success criteria",
     ]
     if not criteria:
         lines.append("_No success criterion listed._")

@@ -46,7 +46,7 @@ From Home, press `n` to open the new-lesson form.
 1. Title and topic are required.
 2. An optional short success description (“what success looks like”, one or two sentences). Leave it blank to use a default: the learner can explain the core ideas in their own words and apply them to a simple example.
 
-There is no criteria editor. The app derives a single required criterion automatically: keywords from the success description (or from the title and topic if it was left blank), plus a default minimum evidence length of 50 characters of the learner’s own words. Confirm → the lesson is stored as `active`.
+The app derives a single required criterion automatically: keywords from the success description (or from the title and topic if it was left blank), plus a default minimum evidence length of 50 characters of the learner’s own words. Confirm → the lesson is stored as `active`.
 
 The TUI does not bank a lesson; only `record_lesson_success` does.
 
@@ -57,7 +57,7 @@ From Home, select an active lesson and press Enter or `s`.
 - The TUI starts an ACP session with Grok Build: `grok agent --always-approve stdio` (or the echo agent in `--demo`).
 - `session/new` attaches the axiomatic MCP server (stdio) and injects a small pedagogical context: the current success criterion, a few related **banked** lessons, 1-hop connections, style notes, and due reviews (hard-capped; the current criterion is never truncated; long descriptions are capped).
 - A short kickoff prompt asks Grok for one diagnostic question and to wait. Subsequent input is `session/prompt`.
-- The center pane streams agent text, dim thought lines, and tool-call cards (`record_lesson_success` is highlighted). The right pane shows the success description, min-chars/keywords, and the last gate result. A failed gate marks the criterion ✗ (never a false all-green).
+- The center pane streams agent text, dim thought lines, and tool-call cards (`record_lesson_success` is highlighted). The right pane shows the success description, the derived min-chars/keywords, and the last gate result. A failed gate marks the criterion ✗ (never a false all-green). Older lessons that still have more than one criterion are listed the same way.
 
 Session working directory is a per-lesson folder under the app data dir (`lessons/<id>/`), not this repository.
 
@@ -68,11 +68,11 @@ This MCP tool is the only writer of banked knowledge. Grok must pass `criterion_
 **Pass only when all of the following hold:**
 
 - The lesson exists and is `active` (drafts cannot be banked).
-- Every **required** criterion has a corresponding evidence item (new lessons have one auto-derived required criterion).
+- Every **required** criterion has a corresponding evidence item (new lessons have one auto-derived required criterion; older lessons may still have more than one).
 - Each evidence `text`, stripped, is at least `min_evidence_chars` (50 for auto-derived criteria; 40 is the model default).
 - If a criterion has `keywords`, every keyword appears in the evidence text (case-insensitive, whitespace-normalized substring).
 - `met` is `true` for required items (`met: false` is an automatic reject).
-- Optional criteria may be omitted; if provided, they still must meet length, keywords, and `met`.
+- Legacy optional criteria may be omitted; if provided, they still must meet length, keywords, and `met`.
 - Unknown `criterion_id`s are ignored (not a failure) and do not satisfy anything.
 - Empty evidence fails.
 
@@ -105,13 +105,13 @@ axiomatic-teach verify
 python scripts/verify_critical_path.py
 ```
 
-`axiomatic-teach verify [--db PATH]` is the product acceptance test. It uses a temporary SQLite file (unless `--db` is given), creates a lesson from title/topic plus a short success description (no criteria editor), rejects insufficient evidence (too short / missing keywords), banks sufficient evidence, then asserts `already_banked` on a third call. No TUI and no Grok.
+`axiomatic-teach verify [--db PATH]` is the product acceptance test. It uses a temporary SQLite file (unless `--db` is given), creates a lesson from title/topic plus a short success description, rejects insufficient evidence (too short / missing keywords), banks sufficient evidence, then asserts `already_banked` on a third call. No TUI and no Grok.
 
 ## Keyboard shortcuts
 
 | Key | Action |
 |-----|--------|
-| `n` | New lesson wizard (from Home) |
+| `n` | New lesson (from Home) |
 | Enter / `s` | Study the selected active lesson |
 | `k` | Knowledge (banked lessons, concepts, relations) |
 | `r` | Review (due FSRS cards) |

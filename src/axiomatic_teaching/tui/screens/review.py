@@ -108,6 +108,8 @@ class ReviewScreen(Screen[None]):
             lines.append("[bold]Success[/]")
             if lesson.success_description:
                 lines.append(escape(lesson.success_description))
+            elif len(lesson.criteria) == 1:
+                lines.append(escape(lesson.criteria[0].statement))
             else:
                 for criterion in lesson.criteria:
                     lines.append(f"• {escape(criterion.statement)}")

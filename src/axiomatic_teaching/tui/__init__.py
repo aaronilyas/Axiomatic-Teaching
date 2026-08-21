@@ -19,7 +19,7 @@ FALLBACK_RULES = (
     "The learner never talks to you except through this TUI. "
     "Teach the current lesson. Do not claim the lesson is complete. "
     "When the learner has met the required success criterion, call the MCP tool "
-    "record_lesson_success with evidence for each criterion. "
+    "record_lesson_success with evidence for that criterion. "
     "Never invent a mark-complete shortcut. The success gate is the only way to bank the lesson."
 )
 
@@ -197,7 +197,3 @@ def format_relation(
         target = by_id.get(relation.to_concept_id)
         right = target.name if target is not None else relation.to_concept_id
     return f"{left} —{relation.relation}→ {right}"
-
-
-def split_csv(value: str) -> list[str]:
-    return [part.strip() for part in value.split(",") if part.strip()]

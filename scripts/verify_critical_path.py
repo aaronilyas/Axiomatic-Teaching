@@ -4,9 +4,9 @@ Product acceptance test:
 
 1. tempfile sqlite
 2. create_repository
-3. create_lesson from title/topic plus a short success description (no
-   criteria editor); one auto-derived required criterion with keywords
-   including \"recursion\" and min_evidence_chars=50
+3. create_lesson from title/topic plus a short success description; one
+   auto-derived required criterion with keywords including \"recursion\"
+   and min_evidence_chars=50
 4. insufficient evidence (too short / missing keyword) → rejected,
    no completion, no style notes, lesson still active
 5. sufficient evidence covering the auto-derived criterion → accepted,

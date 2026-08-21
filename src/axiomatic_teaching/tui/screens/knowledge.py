@@ -166,8 +166,11 @@ def _format_evidence(
         lines.append("")
     if criteria:
         lines.append("[bold]Success[/]")
-        for criterion in criteria:
-            lines.append(f"• {criterion.statement}")
+        if len(criteria) == 1:
+            lines.append(criteria[0].statement)
+        else:
+            for criterion in criteria:
+                lines.append(f"• {criterion.statement}")
         lines.append("")
     if completion is None:
         lines.append("[dim]No stored evidence.[/]")
