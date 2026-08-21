@@ -38,10 +38,10 @@ class StudyScreen(Screen[None]):
     app: AxiomaticApp
 
     BINDINGS = [
-        Binding("escape", "back", "Back"),
-        Binding("ctrl+s", "send", "Send", priority=True),
-        Binding("ctrl+c", "cancel_turn", "Cancel", priority=True),
-        Binding("question_mark", "app.help", "Help"),
+        Binding("escape", "back", "Esc · Go back"),
+        Binding("ctrl+s", "send", "Ctrl+S · Send message", priority=True),
+        Binding("ctrl+c", "cancel_turn", "Ctrl+C · Cancel turn", priority=True),
+        Binding("question_mark", "app.help", "? · Show help"),
     ]
 
     def __init__(self, lesson: Lesson | None = None) -> None:
@@ -104,11 +104,11 @@ class StudyScreen(Screen[None]):
         await self._shutdown_session()
 
     def handle_acp_event(self, event: object) -> None:
+        if isinstance(event, ThoughtChunk):
+            return
         chat = self.query_one(ChatStream)
         if isinstance(event, StreamChunk):
             chat.append_stream(event)
-        elif isinstance(event, ThoughtChunk):
-            chat.append_thought(event)
         elif isinstance(event, ToolCallEvent):
             chat.append_tool(event)
             if is_gate_tool(event):

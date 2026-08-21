@@ -32,9 +32,9 @@ class AxiomaticApp(App[None]):
     TITLE = "Axiomatic Teaching"
     CSS_PATH = _CSS_PATH
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
-        Binding("ctrl+q", "quit", "Quit", show=False),
-        Binding("question_mark", "help", "Help"),
+        Binding("q", "quit", "q · Quit application"),
+        Binding("ctrl+q", "quit", "Ctrl+Q · Quit application", show=False),
+        Binding("question_mark", "help", "? · Show help"),
     ]
 
     def __init__(

@@ -35,12 +35,12 @@ class HomeScreen(Screen[None]):
     app: AxiomaticApp
 
     BINDINGS = [
-        Binding("n", "new_lesson", "New"),
-        Binding("s", "study", "Study"),
-        Binding("k", "knowledge", "Knowledge"),
-        Binding("r", "review", "Review"),
-        Binding("q", "app.quit", "Quit"),
-        Binding("question_mark", "app.help", "Help"),
+        Binding("n", "new_lesson", "n · New lesson"),
+        Binding("s", "study", "s · Study selected lesson"),
+        Binding("k", "knowledge", "k · Open knowledge bank"),
+        Binding("r", "review", "r · Open due reviews"),
+        Binding("q", "app.quit", "q · Quit application"),
+        Binding("question_mark", "app.help", "? · Show help"),
     ]
 
     AUTO_FOCUS = "#home-lessons"

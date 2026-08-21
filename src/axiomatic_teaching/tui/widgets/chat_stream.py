@@ -62,11 +62,7 @@ class ChatStream(RichLog):
         self._arm_partial_flush()
 
     def append_thought(self, thought: ThoughtChunk) -> None:
-        self._flush_stream()
-        text = thought.text.strip()
-        if not text:
-            return
-        self.write(f"[dim italic]thinking · {escape(text)}[/]")
+        """Hide Grok's internal reasoning; ThoughtChunk events never write to the chat."""
 
     def append_tool(self, event: ToolCallEvent) -> None:
         self._flush_stream()

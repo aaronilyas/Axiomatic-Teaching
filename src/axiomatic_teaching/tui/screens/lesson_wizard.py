@@ -23,9 +23,9 @@ class LessonWizard(Screen[Lesson | None]):
     app: AxiomaticApp
 
     BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("ctrl+enter", "create", "Create", priority=True),
-        Binding("question_mark", "app.help", "Help"),
+        Binding("escape", "cancel", "Esc · Cancel form"),
+        Binding("ctrl+enter", "create", "Ctrl+Enter · Create lesson", priority=True),
+        Binding("question_mark", "app.help", "? · Show help"),
     ]
 
     def compose(self) -> ComposeResult:

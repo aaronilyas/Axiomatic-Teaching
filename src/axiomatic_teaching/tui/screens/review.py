@@ -32,12 +32,12 @@ class ReviewScreen(Screen[None]):
     app: AxiomaticApp
 
     BINDINGS = [
-        Binding("escape", "app.pop_screen", "Back"),
-        Binding("1,a", "rate('again')", "Again"),
-        Binding("2,h", "rate('hard')", "Hard"),
-        Binding("3,g", "rate('good')", "Good"),
-        Binding("4,e", "rate('easy')", "Easy"),
-        Binding("question_mark", "app.help", "Help"),
+        Binding("escape", "app.pop_screen", "Esc · Go back"),
+        Binding("1,a", "rate('again')", "1/a · Rate again"),
+        Binding("2,h", "rate('hard')", "2/h · Rate hard"),
+        Binding("3,g", "rate('good')", "3/g · Rate good"),
+        Binding("4,e", "rate('easy')", "4/e · Rate easy"),
+        Binding("question_mark", "app.help", "? · Show help"),
     ]
 
     def __init__(self, start_lesson_id: str | None = None) -> None:

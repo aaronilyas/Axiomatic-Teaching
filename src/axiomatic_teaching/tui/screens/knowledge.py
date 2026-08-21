@@ -25,8 +25,8 @@ class KnowledgeScreen(Screen[None]):
     app: AxiomaticApp
 
     BINDINGS = [
-        Binding("escape", "app.pop_screen", "Back"),
-        Binding("question_mark", "app.help", "Help"),
+        Binding("escape", "app.pop_screen", "Esc · Go back"),
+        Binding("question_mark", "app.help", "? · Show help"),
     ]
 
     def __init__(self, lesson_id: str | None = None) -> None:

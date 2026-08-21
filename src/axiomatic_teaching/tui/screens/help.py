@@ -11,7 +11,7 @@ from textual.widgets import Footer, Static
 
 class HelpScreen(ModalScreen[None]):
     BINDINGS = [
-        Binding("escape,q,question_mark", "dismiss", "Close", show=True),
+        Binding("escape,q,question_mark", "dismiss", "Esc · Close help", show=True),
     ]
 
     def compose(self) -> ComposeResult:
