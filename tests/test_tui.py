@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from textual.widgets import Button, Input
 
 from axiomatic_teaching.app import AxiomaticApp
 from axiomatic_teaching.config import Settings
@@ -24,9 +25,11 @@ from axiomatic_teaching.models import (
 )
 from axiomatic_teaching.tui import parse_gate_result
 from axiomatic_teaching.tui.widgets.criteria_panel import _format_panel, _mark
+from axiomatic_teaching.tui.screens.confirm_delete import ConfirmDeleteScreen
 from axiomatic_teaching.tui.screens.home import HomeScreen
 from axiomatic_teaching.tui.screens.knowledge import KnowledgeScreen
 from axiomatic_teaching.tui.screens.lesson_wizard import LessonWizard
+from axiomatic_teaching.tui.screens.review import ReviewScreen
 from axiomatic_teaching.tui.screens.study import StudyScreen
 from axiomatic_teaching.tui.widgets.chat_stream import ChatStream
 
@@ -425,6 +428,129 @@ def test_parse_gate_result_unwraps_fenced_json() -> None:
     assert result is not None
     assert result.accepted is False
     assert result.lesson_id == "abc"
+
+
+@pytest.mark.asyncio
+async def test_delete_requires_title_confirmation_and_hides_lesson(tmp_path: Path) -> None:
+    app, repository = _app(tmp_path)
+    lesson = repository.create_lesson(
+        NewLessonSpec(
+            title="Recursion",
+            topic="algorithms",
+            success_description="Explain recursion with a base case.",
+        )
+    )
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, HomeScreen)
+        listed = [item.id for item in repository.list_lessons()]
+        assert lesson.id in listed
+
+        await pilot.press("d")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmDeleteScreen)
+        delete_btn = app.screen.query_one("#confirm-delete", Button)
+        assert delete_btn.disabled is True
+
+        warning = str(app.screen.query_one("#confirm-delete-warning").render())
+        assert "Recursion" in str(app.screen.query_one("#confirm-delete-title").render())
+        assert "disappear from every list" in warning
+        assert "never appear again" in warning
+        assert "concepts" in warning.lower()
+        assert "cannot be undone" in warning
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmDeleteScreen)
+        assert repository.get_lesson(lesson.id).status == LessonStatus.ACTIVE
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, HomeScreen)
+        assert repository.get_lesson(lesson.id).status == LessonStatus.ACTIVE
+        assert lesson.id in {item.id for item in repository.list_lessons()}
+
+        await pilot.press("d")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmDeleteScreen)
+        title_input = app.screen.query_one("#confirm-title", Input)
+        title_input.value = "Recursion"
+        app.screen._sync_delete_enabled()
+        await pilot.pause()
+        assert app.screen.query_one("#confirm-delete", Button).disabled is False
+        await pilot.click("#confirm-delete")
+        await pilot.pause()
+        assert isinstance(app.screen, HomeScreen)
+        stored = repository.get_lesson(lesson.id)
+        assert stored is not None
+        assert stored.status == LessonStatus.DELETED
+        assert lesson.id not in {item.id for item in repository.list_lessons()}
+        home_list = app.screen.query_one("#home-lessons")
+        assert home_list.selected_lesson() is None or home_list.selected_lesson().id != lesson.id
+
+
+@pytest.mark.asyncio
+async def test_deleted_banked_lesson_vanishes_from_knowledge_and_review(
+    tmp_path: Path,
+) -> None:
+    app, repository = _app(tmp_path)
+    lesson = repository.create_lesson(
+        NewLessonSpec(
+            title="Big-O",
+            topic="algorithms",
+            criteria=[
+                CriterionDraft(
+                    kind=CriterionKind.EXPLAIN,
+                    statement="Explain big-O as an upper bound on growth.",
+                    required=True,
+                    min_evidence_chars=40,
+                    keywords=["growth"],
+                )
+            ],
+        )
+    )
+    text = (
+        "Big-O describes an upper bound on how an algorithm's cost growth "
+        "behaves as the input size increases; constants are ignored."
+    )
+    result = repository.record_success(
+        RecordSuccessRequest(
+            lesson_id=lesson.id,
+            evidence=[
+                EvidenceItem(criterion_id=lesson.criteria[0].id, text=text, met=True)
+            ],
+        )
+    )
+    assert result.accepted is True
+    card = repository.get_fsrs_card(lesson.id)
+    assert card is not None
+    repository.upsert_fsrs_card(
+        card.model_copy(update={"due": datetime.now(timezone.utc) - timedelta(days=1)})
+    )
+    repository.delete_lesson(lesson.id)
+
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        home = app.screen
+        assert isinstance(home, HomeScreen)
+        due_options = [opt.id for opt in home.query_one("#due-list").options]
+        banked_options = [opt.id for opt in home.query_one("#banked-list").options]
+        assert lesson.id not in due_options
+        assert lesson.id not in banked_options
+
+        await pilot.press("k")
+        await pilot.pause()
+        assert isinstance(app.screen, KnowledgeScreen)
+        knowledge_ids = [opt.id for opt in app.screen.query_one("#knowledge-list").options]
+        assert lesson.id not in knowledge_ids
+        await pilot.press("escape")
+        await pilot.pause()
+
+        app.push_screen(ReviewScreen())
+        await pilot.pause()
+        body = str(app.screen.query_one("#review-body").render())
+        assert "Big-O" not in body
+        assert "Nothing due" in body or "clear" in body.lower()
 
 
 def test_parse_gate_result_unwraps_grok_mcp_envelope() -> None:

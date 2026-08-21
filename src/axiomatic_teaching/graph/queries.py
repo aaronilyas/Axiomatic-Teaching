@@ -150,11 +150,21 @@ def incomplete_lesson_ids(repository: Repository) -> set[str]:
             LessonStatus.DRAFT,
             LessonStatus.ACTIVE,
             LessonStatus.ARCHIVED,
+            LessonStatus.DELETED,
         ) or []:
             incomplete.add(lesson.id)
     except Exception:
         return incomplete
     return incomplete
+
+
+def deleted_lesson_ids(repository: Repository) -> set[str]:
+    """Ids of soft-deleted lessons; empty if the repository call fails."""
+    try:
+        found = repository.list_lessons_by_status(LessonStatus.DELETED) or []
+    except Exception:
+        return set()
+    return {item.id for item in found if item.id}
 
 
 def banked_summaries_for(
@@ -174,6 +184,7 @@ def banked_summaries_for(
 
     blocked = incomplete_lesson_ids(repository)
     blocked.add(current_id)
+    blocked.update(deleted_lesson_ids(repository))
     return [item for item in summaries if item.id not in blocked]
 
 
@@ -248,6 +259,7 @@ __all__ = [
     "banked_summaries_for",
     "concept_ids_for",
     "concept_names_for",
+    "deleted_lesson_ids",
     "format_edge",
     "incomplete_lesson_ids",
     "neighbor_concept_names",

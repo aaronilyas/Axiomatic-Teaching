@@ -244,3 +244,46 @@ HelpScreen {
     height: auto;
     padding: 1 0;
 }
+
+/* Confirm delete */
+
+ConfirmDeleteScreen {
+    align: center middle;
+    background: #07090c 70%;
+}
+
+#confirm-delete-card {
+    width: 80;
+    max-width: 100%;
+    height: auto;
+    max-height: 90%;
+    background: #10161d;
+    border: tall #ff6b6b;
+    padding: 1 2;
+}
+
+#confirm-delete-title {
+    height: auto;
+    margin: 1 0;
+    color: #eef3f8;
+}
+
+#confirm-delete-warning {
+    height: auto;
+    margin: 0 0 1 0;
+    color: #c5d0da;
+}
+
+#confirm-title {
+    margin: 1 0;
+}
+
+#confirm-delete-hint {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#confirm-delete-nav {
+    height: 3;
+    align: left middle;
+}

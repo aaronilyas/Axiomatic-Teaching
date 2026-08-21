@@ -74,6 +74,7 @@ class LessonList(OptionList):
         selected_id: str | None = None,
     ) -> None:
         self._grouped = group
+        lessons = [item for item in lessons if item.status != LessonStatus.DELETED]
         self._lessons = {lesson.id: lesson for lesson in lessons}
         previous = selected_id or self.selected_id
         options: list[Option | None] = []

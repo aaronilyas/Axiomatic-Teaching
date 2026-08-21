@@ -50,6 +50,10 @@ The app derives a single required criterion automatically: keywords from the suc
 
 The TUI does not bank a lesson; only `record_lesson_success` does.
 
+## Delete a lesson
+
+From Home (or Knowledge), select a lesson and press `d`. A confirmation screen shows the title and the consequences: the lesson disappears from every list and from future study context, and cannot be undone from the TUI. Previously banked concepts, relations, and style notes stay in the graph. Type the lesson title exactly, then **Delete permanently** (or Cancel / Esc). This is a soft-delete (`deleted` status); the row is not removed, so completions and graph edges other lessons already use are not cascaded away. FSRS cards for the deleted lesson stop appearing in Review.
+
 ## Study
 
 From Home, select an active lesson and press Enter or `s`.
@@ -113,6 +117,7 @@ python scripts/verify_critical_path.py
 |-----|--------|
 | `n` | New lesson (from Home) |
 | Enter / `s` | Study the selected active lesson |
+| `d` | Delete the selected lesson (Home or Knowledge; confirmation required) |
 | `k` | Knowledge (banked lessons, concepts, relations) |
 | `r` | Review (due FSRS cards) |
 | `?` | Help |

@@ -228,6 +228,7 @@ class SqlRepository:
             rows = session.scalars(
                 select(LessonRow)
                 .options(selectinload(LessonRow.criteria))
+                .where(LessonRow.status != LessonStatus.DELETED.value)
                 .order_by(LessonRow.updated_at.desc())
             ).all()
             return [_lesson_to_model(row) for row in rows]
@@ -253,6 +254,10 @@ class SqlRepository:
             row = session.get(LessonRow, lesson.id)
             existing_status = row.status if row is not None else None
             new_status = lesson.status.value
+            if new_status == LessonStatus.DELETED.value:
+                raise ValueError("lessons can only be deleted via delete_lesson")
+            if existing_status == LessonStatus.DELETED.value:
+                raise ValueError("deleted lessons cannot be modified")
             if (
                 new_status == LessonStatus.COMPLETED.value
                 and existing_status != LessonStatus.COMPLETED.value
@@ -332,6 +337,23 @@ class SqlRepository:
             assert loaded is not None
             return _lesson_to_model(loaded)
 
+    def delete_lesson(self, lesson_id: str) -> Lesson:
+        """Soft-delete: set status to deleted. Completions and graph rows stay."""
+        now = _utcnow()
+        with session_scope(self.engine) as session:
+            row = session.scalar(
+                select(LessonRow)
+                .options(selectinload(LessonRow.criteria))
+                .where(LessonRow.id == lesson_id)
+            )
+            if row is None:
+                raise ValueError(f"lesson not found: {lesson_id}")
+            if row.status != LessonStatus.DELETED.value:
+                row.status = LessonStatus.DELETED.value
+                row.updated_at = now
+                session.flush()
+            return _lesson_to_model(row)
+
     def list_criteria(self, lesson_id: str) -> list[Criterion]:
         with session_scope(self.engine) as session:
             rows = session.scalars(
@@ -356,6 +378,25 @@ class SqlRepository:
                     unmet=[UnmetCriterion(reason="lesson not found")],
                     message="Lesson not found.",
                 )
+
+            if lesson_row.status == LessonStatus.DELETED.value:
+                result = GateResult(
+                    accepted=False,
+                    lesson_id=request.lesson_id,
+                    unmet=[UnmetCriterion(reason="lesson has been deleted")],
+                    message="Lesson has been deleted and cannot be banked.",
+                )
+                session.add(
+                    GateAttemptRow(
+                        id=_new_id(),
+                        lesson_id=request.lesson_id,
+                        accepted=False,
+                        payload_json=request.model_dump_json(),
+                        result_json=result.model_dump_json(),
+                        created_at=_utcnow(),
+                    )
+                )
+                return result
 
             existing = session.scalar(
                 select(CompletionRow).where(CompletionRow.lesson_id == request.lesson_id)
@@ -677,7 +718,10 @@ class SqlRepository:
             rows = session.execute(
                 select(FsrsCardRow, LessonRow)
                 .join(LessonRow, LessonRow.id == FsrsCardRow.lesson_id)
-                .where(FsrsCardRow.due <= moment)
+                .where(
+                    FsrsCardRow.due <= moment,
+                    LessonRow.status != LessonStatus.DELETED.value,
+                )
                 .order_by(FsrsCardRow.due.asc())
             ).all()
             return [

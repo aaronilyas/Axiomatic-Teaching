@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -301,6 +301,120 @@ def test_inconsistent_completed_status_still_banks(tmp_path: Path) -> None:
     assert result.accepted is True
     assert result.already_banked is False
     assert repo.get_completion(lesson.id) is not None
+
+
+def test_delete_lesson_hides_from_lists_and_preserves_side_effects(tmp_path: Path) -> None:
+    repo = create_repository(tmp_path / "db.sqlite")
+    lesson = repo.create_lesson(_spec())
+    other = repo.create_lesson(
+        NewLessonSpec(
+            title="Other",
+            topic="topic",
+            criteria=[
+                CriterionDraft(
+                    kind=CriterionKind.EXPLAIN,
+                    statement="Explain it",
+                    required=True,
+                    min_evidence_chars=10,
+                    keywords=["alpha"],
+                )
+            ],
+        )
+    )
+    crit = lesson.criteria[0]
+    result = repo.record_success(
+        RecordSuccessRequest(
+            lesson_id=lesson.id,
+            evidence=[EvidenceItem(criterion_id=crit.id, text=PASSING_TEXT, met=True)],
+            notes="kept notes",
+            concepts=[ProposedConcept(name="Bayes", description="conditional probability")],
+            relations=[
+                ProposedRelation(
+                    **{
+                        "from": "Bayes",
+                        "to": "Probability",
+                        "relation": RelationType.APPLIES_TO,
+                    }
+                )
+            ],
+            style_note="prefer concrete examples",
+        )
+    )
+    assert result.accepted is True
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    card = repo.get_fsrs_card(lesson.id)
+    assert card is not None
+    repo.upsert_fsrs_card(card.model_copy(update={"due": past}))
+    assert any(item.lesson_id == lesson.id for item in repo.list_due_reviews())
+
+    deleted = repo.delete_lesson(lesson.id)
+    assert deleted.status == LessonStatus.DELETED
+    again = repo.delete_lesson(lesson.id)
+    assert again.status == LessonStatus.DELETED
+
+    visible_ids = {item.id for item in repo.list_lessons()}
+    assert lesson.id not in visible_ids
+    assert other.id in visible_ids
+    assert repo.list_lessons_by_status(LessonStatus.DELETED)[0].id == lesson.id
+    assert all(item.id != lesson.id for item in repo.list_banked_summaries())
+    assert all(item.lesson_id != lesson.id for item in repo.list_due_reviews())
+
+    stored = repo.get_lesson(lesson.id)
+    assert stored is not None
+    assert stored.status == LessonStatus.DELETED
+    completion = repo.get_completion(lesson.id)
+    assert completion is not None
+    assert completion.notes == "kept notes"
+    names = {c.name for c in repo.list_concepts()}
+    assert names == {"Bayes", "Probability"}
+    rels = repo.list_relations()
+    assert len(rels) == 1
+    assert rels[0].from_name == "Bayes"
+    notes = repo.list_style_notes()
+    assert len(notes) == 1
+    assert notes[0].note == "prefer concrete examples"
+    assert repo.get_fsrs_card(lesson.id) is not None
+
+    with pytest.raises(ValueError, match="cannot be modified"):
+        stored.status = LessonStatus.ACTIVE
+        repo.save_lesson(stored)
+    with pytest.raises(ValueError, match="delete_lesson"):
+        loaded = repo.get_lesson(lesson.id)
+        assert loaded is not None
+        loaded.title = "Resurrected"
+        repo.save_lesson(loaded)
+    other.status = LessonStatus.DELETED
+    with pytest.raises(ValueError, match="delete_lesson"):
+        repo.save_lesson(other)
+    still = repo.get_lesson(lesson.id)
+    assert still is not None
+    assert still.status == LessonStatus.DELETED
+    assert still.title == "Lesson"
+
+    rejected = repo.record_success(
+        RecordSuccessRequest(
+            lesson_id=lesson.id,
+            evidence=[EvidenceItem(criterion_id=crit.id, text=PASSING_TEXT, met=True)],
+        )
+    )
+    assert rejected.accepted is False
+    assert "deleted" in rejected.message.lower()
+
+
+def test_delete_unknown_lesson_raises(tmp_path: Path) -> None:
+    repo = create_repository(tmp_path / "db.sqlite")
+    with pytest.raises(ValueError, match="not found"):
+        repo.delete_lesson("missing-id")
+
+
+def test_list_lessons_still_includes_archived(tmp_path: Path) -> None:
+    repo = create_repository(tmp_path / "db.sqlite")
+    lesson = repo.create_lesson(_spec())
+    lesson.status = LessonStatus.ARCHIVED
+    saved = repo.save_lesson(lesson)
+    assert saved.status == LessonStatus.ARCHIVED
+    ids = {item.id for item in repo.list_lessons()}
+    assert lesson.id in ids
 
 
 def test_empty_style_note_not_inserted_on_pass(tmp_path: Path) -> None:

@@ -13,8 +13,9 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header, OptionList, Static
 from textual.widgets.option_list import Option
 
-from axiomatic_teaching.models import BankedLessonSummary, Completion, Concept, Criterion
+from axiomatic_teaching.models import BankedLessonSummary, Completion, Concept, Criterion, Lesson
 from axiomatic_teaching.tui import format_dt, format_relation
+from axiomatic_teaching.tui.screens.confirm_delete import ConfirmDeleteScreen
 from axiomatic_teaching.tui.widgets.status_bar import StatusBar
 
 if TYPE_CHECKING:
@@ -26,6 +27,7 @@ class KnowledgeScreen(Screen[None]):
 
     BINDINGS = [
         Binding("escape", "app.pop_screen", "Esc · Go back"),
+        Binding("d", "delete_lesson", "d · Delete selected lesson"),
         Binding("question_mark", "app.help", "? · Show help"),
     ]
 
@@ -88,6 +90,41 @@ class KnowledgeScreen(Screen[None]):
         if not lesson_id or lesson_id.startswith("__"):
             return
         self._show_lesson(lesson_id)
+
+    def action_delete_lesson(self) -> None:
+        lesson_id = self._select_id
+        if not lesson_id or lesson_id not in self._banked:
+            self.notify("Select a banked lesson first.")
+            return
+        try:
+            lesson = self.app.repository.get_lesson(lesson_id)
+        except Exception as exc:
+            self.notify(f"Could not load lesson: {exc}", severity="error")
+            return
+        if lesson is None:
+            self.notify("Lesson not found.", severity="error")
+            return
+        self._confirm_delete(lesson)
+
+    def _confirm_delete(self, lesson: Lesson) -> None:
+        def _after(confirmed: bool | None) -> None:
+            if not confirmed:
+                return
+            try:
+                self.app.repository.delete_lesson(lesson.id)
+            except Exception as exc:
+                self.notify(f"Could not delete lesson: {exc}", severity="error")
+                return
+            self.notify(f"Deleted “{lesson.title}”.")
+            self._select_id = None
+            self.refresh_data()
+            try:
+                self.app.refresh_counts()
+                self.query_one(StatusBar).refresh_status()
+            except Exception:
+                pass
+
+        self.app.push_screen(ConfirmDeleteScreen(lesson), _after)
 
     def _show_lesson(self, lesson_id: str) -> None:
         self._select_id = lesson_id

@@ -17,6 +17,7 @@ from axiomatic_teaching.context.pedagogy import PEDAGOGY_RULES
 from axiomatic_teaching.db.repository import Repository
 from axiomatic_teaching.graph.queries import (
     banked_summaries_for,
+    deleted_lesson_ids,
     format_edge,
     one_hop_edges,
     select_related_banked,
@@ -51,12 +52,24 @@ def assemble(
     current_core = _format_current_lesson(lesson, criteria)
     mastery = _format_mastery(repository, lesson)
 
-    related = _safe(lambda: select_related_banked(repository, lesson, cap=RELATED_LESSON_CAP), [])
+    hidden = _safe(lambda: deleted_lesson_ids(repository), set())
+    related = [
+        item
+        for item in _safe(
+            lambda: select_related_banked(repository, lesson, cap=RELATED_LESSON_CAP),
+            [],
+        )
+        if item.id not in hidden
+    ]
     relations = _safe(lambda: one_hop_edges(repository, lesson.id, cap=RELATION_CAP), [])
     style_notes = _safe(lambda: list(repository.list_style_notes(limit=STYLE_NOTE_CAP) or []), [])[
         :STYLE_NOTE_CAP
     ]
-    due_reviews = _safe(lambda: list(repository.list_due_reviews() or []), [])[:DUE_REVIEW_CAP]
+    due_reviews = [
+        item
+        for item in _safe(lambda: list(repository.list_due_reviews() or []), [])
+        if item.lesson_id not in hidden
+    ][:DUE_REVIEW_CAP]
 
     desc_limit: int | None = None
     n_styles = len(style_notes)
@@ -165,14 +178,25 @@ def _format_current_lesson(lesson: Lesson, criteria: list[Criterion]) -> str:
 
 
 def _format_mastery(repository: Repository, lesson: Lesson) -> str:
+    hidden = _safe(lambda: deleted_lesson_ids(repository), set())
     due_count = 0
     try:
-        due_count = len(repository.list_due_reviews() or [])
+        due_count = len(
+            [
+                item
+                for item in (repository.list_due_reviews() or [])
+                if item.lesson_id not in hidden
+            ]
+        )
     except Exception:
         due_count = 0
     titles: list[str] = []
     try:
-        summaries = banked_summaries_for(repository, lesson.id)
+        summaries = [
+            item
+            for item in banked_summaries_for(repository, lesson.id)
+            if item.id not in hidden
+        ]
         summaries = sorted(
             summaries,
             key=lambda item: _as_utc(item.completed_at),

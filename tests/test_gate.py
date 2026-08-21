@@ -161,6 +161,14 @@ EVALUATE_CASES = [
         "reason": "lesson is not active",
     },
     {
+        "id": "deleted_cannot_bank",
+        "status": LessonStatus.DELETED,
+        "evidence": [EvidenceItem(criterion_id="c-req", text=PASSING_TEXT, met=True)],
+        "accepted": False,
+        "already_banked": False,
+        "reason": "lesson has been deleted",
+    },
+    {
         "id": "optional_provided_must_pass",
         "status": LessonStatus.ACTIVE,
         "evidence": [

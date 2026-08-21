@@ -14,6 +14,7 @@ from textual.widgets.option_list import Option
 
 from axiomatic_teaching.models import BankedLessonSummary, DueReview, Lesson, LessonStatus
 from axiomatic_teaching.tui import format_dt
+from axiomatic_teaching.tui.screens.confirm_delete import ConfirmDeleteScreen
 from axiomatic_teaching.tui.screens.knowledge import KnowledgeScreen
 from axiomatic_teaching.tui.screens.lesson_wizard import LessonWizard
 from axiomatic_teaching.tui.screens.review import ReviewScreen
@@ -26,8 +27,8 @@ if TYPE_CHECKING:
 
 
 _HINTS = (
-    "[bold]n[/] new  [bold]enter[/]/[bold]s[/] study  [bold]k[/] knowledge  "
-    "[bold]r[/] review  [bold]q[/] quit  [bold]?[/] help"
+    "[bold]n[/] new  [bold]enter[/]/[bold]s[/] study  [bold]d[/] delete  "
+    "[bold]k[/] knowledge  [bold]r[/] review  [bold]q[/] quit  [bold]?[/] help"
 )
 
 
@@ -37,6 +38,7 @@ class HomeScreen(Screen[None]):
     BINDINGS = [
         Binding("n", "new_lesson", "n · New lesson"),
         Binding("s", "study", "s · Study selected lesson"),
+        Binding("d", "delete_lesson", "d · Delete selected lesson"),
         Binding("k", "knowledge", "k · Open knowledge bank"),
         Binding("r", "review", "r · Open due reviews"),
         Binding("q", "app.quit", "q · Quit application"),
@@ -135,6 +137,27 @@ class HomeScreen(Screen[None]):
     def action_review(self) -> None:
         self.app.push_screen(ReviewScreen())
 
+    def action_delete_lesson(self) -> None:
+        lesson = self.query_one("#home-lessons", LessonList).selected_lesson()
+        if lesson is None:
+            self.notify("Select a lesson first.")
+            return
+        self._confirm_delete(lesson)
+
+    def _confirm_delete(self, lesson: Lesson) -> None:
+        def _after(confirmed: bool | None) -> None:
+            if not confirmed:
+                return
+            try:
+                self.app.repository.delete_lesson(lesson.id)
+            except Exception as exc:
+                self.notify(f"Could not delete lesson: {exc}", severity="error")
+                return
+            self.notify(f"Deleted “{lesson.title}”.")
+            self.refresh_data()
+
+        self.app.push_screen(ConfirmDeleteScreen(lesson), _after)
+
     @on(LessonList.LessonChosen, "#home-lessons")
     def _lesson_chosen(self, event: LessonList.LessonChosen) -> None:
         self._open_study(event.lesson)
@@ -162,6 +185,9 @@ class HomeScreen(Screen[None]):
             return
         if lesson.status == LessonStatus.ARCHIVED:
             self.notify("Archived lessons cannot be studied.", severity="warning")
+            return
+        if lesson.status == LessonStatus.DELETED:
+            self.notify("Deleted lessons cannot be studied.", severity="warning")
             return
         if lesson.status == LessonStatus.COMPLETED:
             self.notify("Already banked — restudy only; the gate will not re-bank.")

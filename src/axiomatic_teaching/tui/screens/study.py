@@ -68,8 +68,13 @@ class StudyScreen(Screen[None]):
         lessons = [
             item
             for item in self.app.list_lessons()
-            if item.status not in {LessonStatus.DRAFT, LessonStatus.ARCHIVED}
+            if item.status
+            not in {LessonStatus.DRAFT, LessonStatus.ARCHIVED, LessonStatus.DELETED}
         ]
+        if self.lesson is not None and self.lesson.status == LessonStatus.DELETED:
+            self.notify("Deleted lessons cannot be studied.", severity="warning")
+            self.app.pop_screen()
+            return
         if self.lesson is None and lessons:
             self.lesson = lessons[0]
         if self.lesson is None:
@@ -169,7 +174,8 @@ class StudyScreen(Screen[None]):
             lessons = [
                 item
                 for item in self.app.list_lessons()
-                if item.status not in {LessonStatus.DRAFT, LessonStatus.ARCHIVED}
+                if item.status
+                not in {LessonStatus.DRAFT, LessonStatus.ARCHIVED, LessonStatus.DELETED}
             ]
             self.query_one("#study-lesson-list", LessonList).set_lessons(
                 lessons, group=False, selected_id=lesson.id

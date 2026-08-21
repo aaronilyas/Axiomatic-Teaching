@@ -193,6 +193,8 @@ class AxiomaticApp(App[None]):
         except Exception:
             lessons: list[Lesson] = []
             for status in LessonStatus:
+                if status == LessonStatus.DELETED:
+                    continue
                 try:
                     lessons.extend(self.repository.list_lessons_by_status(status.value))
                 except Exception:

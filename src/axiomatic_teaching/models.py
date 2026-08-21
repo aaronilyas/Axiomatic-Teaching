@@ -14,6 +14,9 @@ class LessonStatus(StrEnum):
     ACTIVE = "active"
     COMPLETED = "completed"
     ARCHIVED = "archived"
+    # Soft-delete. The row is kept so completions/concepts/relations survive;
+    # TUI lists and context assembly must never surface a deleted lesson.
+    DELETED = "deleted"
 
 
 class CriterionKind(StrEnum):

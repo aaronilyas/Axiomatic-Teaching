@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from axiomatic_teaching.config import CONTEXT_CHAR_BUDGET, RELATED_LESSON_CAP
 from axiomatic_teaching.context import assemble, kickoff_prompt
@@ -12,13 +13,16 @@ from axiomatic_teaching.models import (
     Concept,
     ConceptRelation,
     Criterion,
+    CriterionDraft,
     CriterionKind,
     DueReview,
+    EvidenceItem,
     FsrsCard,
     GateResult,
     Lesson,
     LessonStatus,
     NewLessonSpec,
+    ProposedConcept,
     RecordSuccessRequest,
     RelationType,
     StyleNote,
@@ -229,7 +233,11 @@ class FakeRepository:
         return self.lessons.get(lesson_id)
 
     def list_lessons(self) -> list[Lesson]:
-        return list(self.lessons.values())
+        return [
+            item
+            for item in self.lessons.values()
+            if item.status != LessonStatus.DELETED
+        ]
 
     def list_lessons_by_status(self, *statuses: str) -> list[Lesson]:
         wanted = {str(status) for status in statuses}
@@ -238,6 +246,12 @@ class FakeRepository:
     def save_lesson(self, lesson: Lesson) -> Lesson:
         self.lessons[lesson.id] = lesson
         return lesson
+
+    def delete_lesson(self, lesson_id: str) -> Lesson:
+        lesson = self.lessons[lesson_id]
+        updated = lesson.model_copy(update={"status": LessonStatus.DELETED})
+        self.lessons[lesson_id] = updated
+        return updated
 
     def list_criteria(self, lesson_id: str) -> list[Criterion]:
         lesson = self.lessons.get(lesson_id)
@@ -299,7 +313,12 @@ class FakeRepository:
         return None
 
     def list_due_reviews(self, now: datetime | None = None) -> list[DueReview]:
-        return list(self.due_reviews)
+        hidden = {
+            item.id
+            for item in self.lessons.values()
+            if item.status == LessonStatus.DELETED
+        }
+        return [item for item in self.due_reviews if item.lesson_id not in hidden]
 
     def add_review(self, lesson_id: str, rating: str, scheduled_days: float) -> None:
         return None
@@ -358,6 +377,19 @@ def test_incomplete_lessons_are_not_listed_as_banked() -> None:
     text = assemble(repo, repo.current)
     assert INCOMPLETE_TITLE not in text
     assert "UNBANKED" not in text
+
+
+def test_deleted_lesson_is_not_listed_as_banked_or_due() -> None:
+    repo = FakeRepository()
+    doomed = repo.lessons["c1"]
+    unique_title = doomed.title
+    assert unique_title in assemble(repo, repo.current)
+    repo.delete_lesson(doomed.id)
+    text = assemble(repo, repo.current)
+    assert unique_title not in text
+    assert doomed.id not in {item.id for item in repo.list_lessons()}
+    assert all(item.lesson_id != doomed.id for item in repo.list_due_reviews())
+    assert CRITERION_STATEMENT in text
 
 
 def test_assemble_respects_char_budget() -> None:
@@ -421,3 +453,86 @@ def test_assemble_survives_empty_repository_methods() -> None:
     assert "Pedagogy rules" in text or "zone of proximal development" in text
     assert CURRENT_TITLE in text
     assert len(text) <= CONTEXT_CHAR_BUDGET
+
+
+PASSING_TEXT = (
+    "Bayes updates a prior with likelihood to get a posterior in probability. "
+    "I can walk a simple diagnostic-test example in my own words."
+)
+
+
+def test_sql_assemble_omits_deleted_lesson_and_keeps_graph(tmp_path: Path) -> None:
+    from axiomatic_teaching.db.repository import create_repository
+
+    repo = create_repository(tmp_path / "axiomatic.db")
+    doomed_title = "UniqueDeletedLessonTitleXYZ"
+    keeper_title = "Keeper lesson on posteriors"
+    doomed = repo.create_lesson(
+        NewLessonSpec(
+            title=doomed_title,
+            topic="Probability",
+            criteria=[
+                CriterionDraft(
+                    statement="Explain the posterior.",
+                    required=True,
+                    min_evidence_chars=10,
+                    keywords=["posterior"],
+                )
+            ],
+        )
+    )
+    keeper = repo.create_lesson(
+        NewLessonSpec(
+            title=keeper_title,
+            topic="Probability",
+            criteria=[
+                CriterionDraft(
+                    statement="Apply a posterior update.",
+                    required=True,
+                    min_evidence_chars=10,
+                    keywords=["posterior"],
+                )
+            ],
+        )
+    )
+    for lesson in (doomed, keeper):
+        result = repo.record_success(
+            RecordSuccessRequest(
+                lesson_id=lesson.id,
+                evidence=[
+                    EvidenceItem(
+                        criterion_id=lesson.criteria[0].id,
+                        text=PASSING_TEXT,
+                        met=True,
+                    )
+                ],
+                concepts=[ProposedConcept(name="posterior", description="updated belief")],
+                style_note="prefer short probes",
+            )
+        )
+        assert result.accepted is True
+
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    card = repo.get_fsrs_card(doomed.id)
+    assert card is not None
+    repo.upsert_fsrs_card(card.model_copy(update={"due": past}))
+    assert any(item.lesson_id == doomed.id for item in repo.list_due_reviews())
+
+    before = assemble(repo, keeper)
+    assert doomed_title in before
+
+    deleted = repo.delete_lesson(doomed.id)
+    assert deleted.status == LessonStatus.DELETED
+    assert repo.get_completion(doomed.id) is not None
+    names = {c.name for c in repo.list_concepts()}
+    assert "posterior" in names
+    assert repo.list_style_notes()
+    assert all(item.id != doomed.id for item in repo.list_banked_summaries())
+    assert all(item.lesson_id != doomed.id for item in repo.list_due_reviews())
+
+    keeper = repo.get_lesson(keeper.id)
+    assert keeper is not None
+    after = assemble(repo, keeper)
+    assert doomed_title not in after
+    assert keeper_title in after
+    assert "prefer short probes" in after

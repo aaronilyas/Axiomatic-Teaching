@@ -29,6 +29,7 @@ class HelpScreen(ModalScreen[None]):
 _HELP = """[bold]Home[/]
   [cyan]n[/]          new lesson
   [cyan]enter[/]/[cyan]s[/]    study selected lesson (not drafts)
+  [cyan]d[/]          delete selected lesson (confirmation required)
   [cyan]k[/]          knowledge bank
   [cyan]r[/]          due reviews
   [cyan]q[/]          quit
@@ -40,12 +41,22 @@ _HELP = """[bold]Home[/]
   [cyan]ctrl+enter[/] create
   [cyan]esc[/]        cancel
 
+[bold]Delete[/]
+  Type the lesson title, then [cyan]Delete permanently[/].
+  [cyan]esc[/]        cancel
+  Banked concepts, relations, and style notes are kept.
+  The lesson never reappears in lists or study context.
+
 [bold]Study[/]
   [cyan]ctrl+s[/]     send
   [cyan]ctrl+c[/]     cancel turn
   [cyan]esc[/]        back (shutdown session)
   Completion is only via the [cyan]record_lesson_success[/] gate.
   Demo mode cannot bank; use Grok Build for the live gate.
+
+[bold]Knowledge[/]
+  [cyan]d[/]          delete selected banked lesson (confirmation required)
+  [cyan]esc[/]        back
 
 [bold]Review[/]
   [cyan]1[/]/[cyan]a[/]        again

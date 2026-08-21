@@ -62,6 +62,13 @@ def _check_item(criterion: Criterion, item: EvidenceItem) -> list[UnmetCriterion
 
 def evaluate(lesson: Lesson, request: RecordSuccessRequest) -> GateResult:
     """Return whether `request` satisfies every required (and any provided optional) criterion."""
+    if lesson.status == LessonStatus.DELETED:
+        return GateResult(
+            accepted=False,
+            lesson_id=lesson.id,
+            unmet=[UnmetCriterion(criterion_id=None, reason="lesson has been deleted")],
+            message="Lesson has been deleted and cannot be banked.",
+        )
     if lesson.status == LessonStatus.COMPLETED:
         return GateResult(
             accepted=True,
