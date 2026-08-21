@@ -1,13 +1,14 @@
 """Assemble, write, and open self-contained lesson HTML for `present_lesson_html`.
 
 The MCP handler validates and returns structured JSON. The TUI writes the file
-into the per-lesson workspace and opens it with stdlib ``webbrowser``.
+into the per-lesson workspace and opens it (``os.startfile`` on Windows).
 """
 
 from __future__ import annotations
 
 import html as html_lib
 import json
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -214,14 +215,25 @@ def open_present_file(
     *,
     opener: Callable[[str], bool] | None = None,
 ) -> bool:
-    uri = file_uri(path)
-    fn = opener
-    if fn is None:
+    real = path.resolve()
+    if opener is not None:
+        try:
+            return bool(opener(file_uri(real)))
+        except Exception:
+            return False
+    if os.name == "nt":
+        startfile = getattr(os, "startfile", None)
+        if not callable(startfile):
+            return False
+        try:
+            startfile(os.fspath(real))
+            return True
+        except Exception:
+            return False
+    try:
         import webbrowser
 
-        fn = webbrowser.open_new_tab
-    try:
-        return bool(fn(uri))
+        return bool(webbrowser.open_new_tab(file_uri(real)))
     except Exception:
         return False
 

@@ -17,6 +17,36 @@ from axiomatic_teaching.acp_client.events import (
 )
 from axiomatic_teaching.tui import is_gate_tool, is_present_html_tool
 
+# Host-injected session context / Grok system blobs must never reach the learner.
+_HOST_CONTEXT_MARKERS = (
+    "<axiomatic-context>",
+    "</axiomatic-context>",
+    "# Pedagogy rules",
+    "min_evidence_chars",
+    "<user_info>",
+    "</user_info>",
+    "<human_rules>",
+    "</human_rules>",
+    "<available_skills>",
+    "</available_skills>",
+)
+
+
+def is_host_context_text(text: str) -> bool:
+    """True when *text* looks like host rules, Grok system prompt, or assembled context."""
+    if not text:
+        return False
+    for marker in _HOST_CONTEXT_MARKERS:
+        if marker in text:
+            return True
+    if "- **keywords:**" in text and (
+        "- **min_evidence_chars:**" in text or "min_evidence_chars" in text
+    ):
+        return True
+    if "#### " in text and "- **id:**" in text and "- **statement:**" in text:
+        return True
+    return False
+
 
 class ChatStream(RichLog):
     DEFAULT_CSS = """
@@ -48,6 +78,12 @@ class ChatStream(RichLog):
 
     def append_stream(self, chunk: StreamChunk) -> None:
         role = chunk.role or "agent"
+        # Learner turns are rendered only via append_user. Host user_message_chunk
+        # (kickoff / echoed session/prompt) must never appear as a "you" line.
+        if role.lower() == "user":
+            return
+        if is_host_context_text(chunk.text):
+            return
         if self._stream_role not in (None, role):
             self._flush_stream()
         if self._stream_role is None:
@@ -80,14 +116,17 @@ class ChatStream(RichLog):
         detail_lines = [f"[bold]{escape(title)}[/]", f"[dim]{escape(status)}[/]"]
         if present:
             label = "lesson page"
+            given = ""
             if isinstance(event.raw_input, dict):
                 given = str(event.raw_input.get("title") or "").strip()
-                if given and given.lower() != "present_lesson_html":
-                    label = given
+            if (not given or given.lower() == "present_lesson_html") and event.title:
+                given = event.title.strip()
+            if given and given.lower() != "present_lesson_html":
+                label = given
             detail_lines.append(f"[dim]{escape(label)}[/]")
         elif event.raw_output is not None:
             preview = _preview(event.raw_output)
-            if preview:
+            if preview and not is_host_context_text(str(event.raw_output)):
                 detail_lines.append(preview)
         body = Text.from_markup("\n".join(detail_lines))
         self.write(

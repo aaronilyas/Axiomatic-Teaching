@@ -599,6 +599,20 @@ def test_present_page_title_does_not_trip_gate() -> None:
     assert is_gate_tool(event) is False
 
 
+def test_present_detected_by_html_payload_not_title() -> None:
+    from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+    event = ToolCallEvent(
+        tool_call_id="fig",
+        title="Lesson figure",
+        status="completed",
+        raw_input={"html": "<p>Hi</p>", "title": "Fig"},
+        is_present_html=False,
+    )
+    assert is_present_html_tool(event)
+    assert is_gate_tool(event) is False
+
+
 def _chat_text(chat: ChatStream) -> str:
     """Join RichLog lines and flatten segment text so wrapped system lines stay searchable."""
     chunks: list[str] = []
@@ -790,8 +804,16 @@ async def test_present_html_uses_pending_html_when_completed_omits_input(
 async def test_present_html_opens_browser_when_not_demo(
     tmp_path: Path, monkeypatch
 ) -> None:
+    import os
+
     monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
     opened: list[str] = []
+    monkeypatch.setattr(
+        os,
+        "startfile",
+        lambda path: opened.append(str(path)) or True,
+        raising=False,
+    )
     monkeypatch.setattr(
         "webbrowser.open_new_tab",
         lambda uri: opened.append(uri) or True,
@@ -818,8 +840,7 @@ async def test_present_html_opens_browser_when_not_demo(
         )
         await pilot.pause()
         assert len(opened) == 1
-        assert opened[0].startswith("file://")
-        assert "present-001.html" in opened[0]
+        assert "present-001.html" in str(opened[0])
         chat = _chat_text(app.screen.query_one(ChatStream))
         assert "opened in your browser" in chat.lower()
         assert "Demo mode" not in chat
@@ -896,3 +917,110 @@ async def test_present_html_write_failure_keeps_session(
         await pilot.pause()
         chat = _chat_text(app.screen.query_one(ChatStream))
         assert "not connected" in chat.lower() or "ACP" in chat
+
+
+def test_is_host_context_text_markers() -> None:
+    from axiomatic_teaching.tui.widgets.chat_stream import is_host_context_text
+
+    assert is_host_context_text("<axiomatic-context>\n# Pedagogy rules\n</axiomatic-context>")
+    assert is_host_context_text("criterion uses min_evidence_chars: 40")
+    assert is_host_context_text("<user_info>\nOS: windows\n</user_info>")
+    assert is_host_context_text("<human_rules>Do not mention</human_rules>")
+    assert is_host_context_text(
+        "#### 11111111-2222-3333-4444-555555555555\n- **id:** 11111111-2222-3333-4444-555555555555\n"
+        "- **statement:** Explain it\n- **min_evidence_chars:** 40\n- **keywords:** posterior"
+    )
+    assert not is_host_context_text("What is a prior in your own words?")
+    assert not is_host_context_text("hello")
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_hides_host_user_chunks_shows_learner_and_agent() -> None:
+    from textual.app import App
+
+    from axiomatic_teaching.acp_client.events import StreamChunk, ThoughtChunk, ToolCallEvent
+    from axiomatic_teaching.tui.widgets.chat_stream import ChatStream
+
+    class Harness(App):
+        def compose(self):
+            yield ChatStream()
+
+    app = Harness()
+    async with app.run_test(size=(80, 24)) as pilot:
+        chat = app.query_one(ChatStream)
+        chat.append_stream(
+            StreamChunk(
+                text=(
+                    "<axiomatic-context>\n# Pedagogy rules\n"
+                    "min_evidence_chars: 40\n- **keywords:** posterior, likelihood\n"
+                    "</axiomatic-context>\nBegin the lesson titled Bayes."
+                ),
+                role="user",
+            )
+        )
+        chat.append_stream(
+            StreamChunk(text="Begin the lesson titled Bayes. diagnostic question.", role="user")
+        )
+        chat.append_user("hello")
+        chat.append_stream(StreamChunk(text="What is a prior?", role="agent"))
+        chat.append_stream(
+            StreamChunk(text="# Pedagogy rules\nmin_evidence_chars: 40\n", role="agent")
+        )
+        chat.append_thought(ThoughtChunk(text="I should hide this internal chain."))
+        chat.append_tool(
+            ToolCallEvent(
+                tool_call_id="fig",
+                title="Lesson figure",
+                status="completed",
+                raw_input={"html": "<p>Hi</p>", "title": "Fig"},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        text = _chat_text(chat)
+        assert "hello" in text
+        assert "What is a prior?" in text
+        assert "you" in text.lower()
+        assert "tutor" in text.lower() or "What is a prior?" in text
+        assert "Pedagogy rules" not in text
+        assert "axiomatic-context" not in text
+        assert "min_evidence_chars" not in text
+        assert "posterior, likelihood" not in text
+        assert "Begin the lesson titled Bayes" not in text
+        assert "I should hide this internal chain" not in text
+        assert "<p>Hi</p>" not in text
+        assert "Fig" in text
+
+
+@pytest.mark.asyncio
+async def test_present_human_title_writes_file_without_dumping_html(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    app, repository = _app(tmp_path)
+    lesson = _study_lesson(repository, "Figures")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+        event = ToolCallEvent(
+            tool_call_id="fig",
+            title="Lesson figure",
+            status="completed",
+            raw_input={"html": "<p>Hi</p>", "title": "Fig"},
+            is_present_html=False,
+        )
+        assert is_present_html_tool(event)
+        app.dispatch_acp_event(event)
+        await pilot.pause()
+        workspace = tmp_path / "lessons" / lesson.id
+        files = list(workspace.glob("present-*.html"))
+        assert len(files) == 1
+        assert files[0].name == "present-001.html"
+        body = files[0].read_text(encoding="utf-8")
+        assert "<p>Hi</p>" in body
+        chat = _chat_text(app.screen.query_one(ChatStream))
+        assert "<p>Hi</p>" not in chat
+        assert "Fig" in chat or "Lesson figure" in chat or "lesson page" in chat.lower()

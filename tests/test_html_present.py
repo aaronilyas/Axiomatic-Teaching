@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path, PureWindowsPath
+
+import pytest
 
 from axiomatic_teaching.present import (
     DEMO_SAVED,
@@ -15,6 +18,7 @@ from axiomatic_teaching.present import (
     PresentHtmlRequest,
     deliver_present,
     file_uri,
+    open_present_file,
     parse_present_html,
     parse_present_output,
     wrap_lesson_html,
@@ -251,3 +255,82 @@ def test_agent_path_is_not_used_for_write(tmp_path: Path) -> None:
     assert result.path is not None
     assert result.path.name == "present-001.html"
     assert not (tmp_path / "evil.html").exists()
+
+
+def test_windows_opener_uses_startfile_filesystem_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[str] = []
+
+    def fake_startfile(path: str) -> None:
+        called.append(path)
+
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(os, "startfile", fake_startfile, raising=False)
+    result = deliver_present(tmp_path, PresentHtmlRequest(html="<p>Hi</p>", title="Hi"))
+    assert result.ok is True
+    assert result.written is True
+    assert result.opened is True
+    assert result.path is not None
+    assert result.path.name == "present-001.html"
+    assert result.path.is_file()
+    assert called == [os.fspath(result.path.resolve())]
+    assert not called[0].startswith("file:")
+    assert result.uri.startswith("file://")
+    assert "\\" not in result.uri
+    real = os.fspath(result.path.resolve())
+    if len(real) >= 2 and real[1] == ":":
+        assert f"{real[0].upper()}:" in result.uri or f"/{real[0].upper()}:" in result.uri.upper()
+
+
+def test_windows_opener_false_still_leaves_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: list[str] = []
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(os, "startfile", lambda path: called.append(path), raising=False)
+    result = deliver_present(
+        tmp_path,
+        PresentHtmlRequest(html="<p>Hi</p>"),
+        open_browser=False,
+    )
+    assert result.ok is True
+    assert result.opened is False
+    assert result.written is True
+    assert result.path is not None
+    assert result.path.is_file()
+    assert called == []
+    assert result.uri.startswith("file://")
+    assert "\\" not in result.uri
+
+
+def test_windows_startfile_failure_still_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(_path: str) -> None:
+        raise OSError("no association")
+
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(os, "startfile", boom, raising=False)
+    result = deliver_present(tmp_path, PresentHtmlRequest(html="<p>Hi</p>"))
+    assert result.ok is True
+    assert result.opened is False
+    assert result.path is not None
+    assert result.path.is_file()
+    assert SUCCESS_NO_BROWSER.format(uri=result.uri) == result.message
+    assert "\\" not in result.uri
+
+
+def test_open_present_file_nt_calls_startfile_not_uri(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "present-001.html"
+    path.write_text("<html></html>", encoding="utf-8")
+    called: list[str] = []
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(os, "startfile", lambda p: called.append(p), raising=False)
+    assert open_present_file(path) is True
+    assert called == [os.fspath(path.resolve())]
+    uri = file_uri(path)
+    assert uri.startswith("file://")
+    assert "\\" not in uri

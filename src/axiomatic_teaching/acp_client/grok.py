@@ -26,6 +26,10 @@ _CLIENT_TITLE = "Axiomatic Teaching"
 _MCP_NAME = "axiomatic"
 _MCP_ARGS = ["-m", "axiomatic_teaching.mcp_server.server"]
 _STDERR_LOG_NAME = "grok-acp.log"
+_PRESENT_HTML_TOOL = "present_lesson_html"
+# Short fallback so a missing status push cannot block the first tutor turn.
+_MCP_READY_TIMEOUT = 12.0
+_MCP_READY_STATUSES = frozenset({"ready", "connected", "ok", "initialized"})
 
 
 def _package_dir() -> Path:
@@ -75,11 +79,96 @@ def _agent_command(settings: Settings) -> tuple[str, list[str]]:
     return grok, args
 
 
-def _wrap_kickoff(rules: str, kickoff_prompt: str) -> str:
-    rules = rules.strip()
-    if not rules:
-        return kickoff_prompt
-    return f"<axiomatic-context>\n{rules}\n</axiomatic-context>\n\n{kickoff_prompt}"
+def axiomatic_mcp_ready(method: str, params: object | None) -> bool:
+    """True when an ACP ext notification shows the axiomatic MCP tools are up."""
+    blob = params if isinstance(params, dict) else {}
+    if _payload_lists_present_tool(blob):
+        return True
+    norm = _normalize_ext_method(method)
+    if "mcp" not in norm:
+        return False
+    if _server_named_axiomatic(blob) and _status_is_ready(blob):
+        return True
+    for key in ("servers", "mcpServers", "mcp_servers"):
+        servers = blob.get(key)
+        if not isinstance(servers, list):
+            continue
+        for server in servers:
+            if not isinstance(server, dict):
+                continue
+            if _server_named_axiomatic(server) and (
+                _status_is_ready(server) or _payload_lists_present_tool(server)
+            ):
+                return True
+            session = server.get("session")
+            if isinstance(session, dict) and _server_named_axiomatic(server):
+                if _status_is_ready(session) or _payload_lists_present_tool(session):
+                    return True
+    return False
+
+
+def _normalize_ext_method(method: str) -> str:
+    text = (method or "").strip().lstrip("/")
+    if text.startswith("_x.ai"):
+        text = "x.ai" + text[5:]
+    return text.lower()
+
+
+def _server_named_axiomatic(blob: dict[str, Any]) -> bool:
+    for key in ("name", "server", "serverName", "server_name", "id"):
+        value = blob.get(key)
+        if isinstance(value, str) and value.strip().lower() == _MCP_NAME:
+            return True
+    return False
+
+
+def _status_is_ready(blob: dict[str, Any]) -> bool:
+    for key in ("status", "state"):
+        value = blob.get(key)
+        if isinstance(value, str) and value.strip().lower() in _MCP_READY_STATUSES:
+            return True
+    nested = blob.get("session")
+    if isinstance(nested, dict):
+        return _status_is_ready(nested)
+    return False
+
+
+def _payload_lists_present_tool(payload: object, depth: int = 0) -> bool:
+    if depth > 6 or payload is None:
+        return False
+    if isinstance(payload, str):
+        return _PRESENT_HTML_TOOL in payload and len(payload) < 400
+    if isinstance(payload, dict):
+        for key in ("name", "tool", "toolName", "tool_name", "id"):
+            value = payload.get(key)
+            if isinstance(value, str) and _PRESENT_HTML_TOOL in value:
+                return True
+        for key in ("tools", "servers", "mcpServers", "mcp_servers", "session"):
+            if key in payload and _payload_lists_present_tool(payload[key], depth + 1):
+                return True
+        return False
+    if isinstance(payload, (list, tuple)):
+        return any(_payload_lists_present_tool(item, depth + 1) for item in payload)
+    return False
+
+
+class _McpReadyClient(AxiomaticClient):
+    """AxiomaticClient that surfaces Grok MCP-status ext notifications."""
+
+    def __init__(
+        self,
+        on_event: Callable[[Any], None],
+        on_mcp_notification: Callable[[str, dict[str, Any]], None],
+    ) -> None:
+        super().__init__(on_event)
+        self._on_mcp_notification = on_mcp_notification
+
+    async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
+        await super().ext_notification(method, params)
+        try:
+            self._on_mcp_notification(method, params or {})
+        except Exception:
+            log.debug("MCP notification hook failed", exc_info=True)
 
 
 _MCP_ENV_PASSTHROUGH = (
@@ -163,6 +252,7 @@ class GrokSession:
         self._stderr: IO[bytes] | None = None
         self._prompt_lock = asyncio.Lock()
         self._dead = False
+        self._mcp_ready = asyncio.Event()
         try:
             self._loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
         except RuntimeError:
@@ -276,7 +366,8 @@ class GrokSession:
             await self._shutdown_unlocked()
             raise RuntimeError("agent process does not expose stdio pipes")
 
-        client = AxiomaticClient(self._emit)
+        self._mcp_ready = asyncio.Event()
+        client = _McpReadyClient(self._emit, self._on_mcp_notification)
         self._conn = connect_to_agent(client, self._process.stdin, self._process.stdout)
         self._emit(AgentStatus(connected=True, message="initializing", session_id=None, busy=True))
 
@@ -307,7 +398,8 @@ class GrokSession:
             self._emit(
                 AgentStatus(connected=True, message="session ready", session_id=self._session_id, busy=True)
             )
-            await self._prompt_unlocked([text_block(_wrap_kickoff(rules, kickoff_prompt))])
+            await self._wait_mcp_ready()
+            await self._prompt_unlocked([text_block(kickoff_prompt)])
         except Exception as exc:
             self._emit(
                 AgentStatus(
@@ -318,6 +410,19 @@ class GrokSession:
                 )
             )
             raise
+
+    def _on_mcp_notification(self, method: str, params: dict[str, Any]) -> None:
+        if axiomatic_mcp_ready(method, params):
+            self._mcp_ready.set()
+
+    async def _wait_mcp_ready(self) -> None:
+        if _is_echo(self._settings) or self._mcp_ready.is_set():
+            return
+        self._set_busy(True, "waiting for MCP")
+        try:
+            await asyncio.wait_for(self._mcp_ready.wait(), timeout=_MCP_READY_TIMEOUT)
+        except asyncio.TimeoutError:
+            log.info("timed out waiting for axiomatic MCP; sending kickoff")
 
     async def _prompt_unlocked(self, prompt: list[Any]) -> None:
         conn, session_id = self._conn, self._session_id

@@ -123,7 +123,15 @@ def _is_present_html(
     raw_output: dict[str, Any] | None = None,
     extra: str = "",
 ) -> bool:
-    return _mentions_tool(_PRESENT_HTML, title, kind, raw_input, raw_output, extra=extra)
+    if _mentions_tool(_PRESENT_HTML, title, kind, raw_input, raw_output, extra=extra):
+        return True
+    from axiomatic_teaching.present import parse_present_html
+
+    if parse_present_html(raw_input) is not None:
+        return True
+    if raw_output is not None and parse_present_html(raw_output) is not None:
+        return True
+    return False
 
 
 def _plan_entries(update: Any) -> list[str]:
@@ -209,6 +217,7 @@ class AxiomaticClient(Client):
             }
             if str(status) in {"completed", "failed"}:
                 self._tool_calls.pop(tool_call_id, None)
+            gate = _is_success_gate(title, kind, raw_input, raw_output, extra=name)
             self._emit(
                 ToolCallEvent(
                     tool_call_id=tool_call_id,
@@ -218,11 +227,13 @@ class AxiomaticClient(Client):
                     raw_input=raw_input,
                     raw_output=raw_output,
                     session_id=session_id,
-                    is_success_gate=_is_success_gate(
-                        title, kind, raw_input, raw_output, extra=name
-                    ),
-                    is_present_html=_is_present_html(
-                        title, kind, raw_input, raw_output, extra=name
+                    is_success_gate=gate,
+                    is_present_html=(
+                        False
+                        if gate
+                        else _is_present_html(
+                            title, kind, raw_input, raw_output, extra=name
+                        )
                     ),
                 )
             )

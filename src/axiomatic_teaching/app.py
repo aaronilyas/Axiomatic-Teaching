@@ -176,19 +176,23 @@ class AxiomaticApp(App[None]):
         if lesson.status.value == "completed":
             return (
                 f"This lesson titled {lesson.title} is already banked. Restudy only: "
-                "do not call record_lesson_success. Start with one diagnostic question. "
-                "The learner already sees the success criterion — do not recap it. "
-                "Wait. After they answer, you may call present_lesson_html for "
-                "exposition-only reading, then probe in this chat."
+                "do not call record_lesson_success. On this first tutor turn, (1) ask one "
+                "diagnostic question at the edge of competence in this chat, and (2) you MUST "
+                "call present_lesson_html in the same turn with self-contained exposition-only "
+                "HTML (no questions, quizzes, or JavaScript). The learner already sees the "
+                "success criterion — do not recap it. Do not lecture in this chat; wait for "
+                "their answer before teaching here. Presenting HTML is not evidence. "
+                "Do not use fs/write_text_file."
             )
         return (
             f"Begin the lesson titled {lesson.title}. "
-            "Start with one diagnostic question at the edge of competence. "
-            "The learner already sees the success criterion — do not recap it. "
-            "Wait for their answer before teaching. Do not lecture. "
-            "Do not declare the lesson complete yourself. "
-            "After they answer, you may call present_lesson_html for exposition-only "
-            "reading, then probe in this chat."
+            "On this first tutor turn, (1) ask one diagnostic question at the edge of "
+            "competence in this chat, and (2) you MUST call present_lesson_html in the same "
+            "turn with self-contained exposition-only HTML (no questions, quizzes, or "
+            "JavaScript). The learner already sees the success criterion — do not recap it. "
+            "Wait for their answer before teaching in this chat. Do not lecture. "
+            "Do not declare the lesson complete yourself. Presenting HTML is not evidence. "
+            "Do not use fs/write_text_file."
         )
 
     def list_lessons(self) -> list[Lesson]:

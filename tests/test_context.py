@@ -405,6 +405,15 @@ def test_kickoff_prompt_mentions_title() -> None:
     assert "diagnostic question" in prompt
     assert "already sees" in prompt
     assert "present_lesson_html" in prompt
+    assert "MUST call present_lesson_html" in prompt
+    assert "same turn" in prompt
+    assert "After they answer, you may call" not in prompt
+    assert "Wait for their answer before teaching in this chat" in prompt
+    assert "fs/write_text_file" in prompt
+    assert "<axiomatic-context>" not in prompt
+    assert "min_evidence_chars" not in prompt
+    assert "crit-1" not in prompt
+    assert "posterior" not in prompt
 
 
 def test_assemble_includes_html_present_rules() -> None:
@@ -413,6 +422,9 @@ def test_assemble_includes_html_present_rules() -> None:
     assert "present_lesson_html" in text
     assert "Initial reading" in text
     assert "not evidence" in text.lower()
+    assert "same turn" in text
+    assert "Do not wait for the learner's answer before presenting HTML" in text
+    assert "fs/write_text_file" in text
 
 
 def test_kickoff_prompt_restudy_for_completed() -> None:
@@ -421,6 +433,9 @@ def test_kickoff_prompt_restudy_for_completed() -> None:
     prompt = kickoff_prompt(completed)
     assert "already banked" in prompt
     assert "record_lesson_success" in prompt
+    assert "MUST call present_lesson_html" in prompt
+    assert "same turn" in prompt
+    assert "After they answer, you may call" not in prompt
 
 
 def test_current_description_is_truncated() -> None:

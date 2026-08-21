@@ -11,6 +11,7 @@ from textual.message import Message
 
 from axiomatic_teaching.acp_client.events import ToolCallEvent
 from axiomatic_teaching.models import Concept, ConceptRelation, GateResult
+from axiomatic_teaching.present import parse_present_html
 
 GATE_TOOL_NAME = "record_lesson_success"
 PRESENT_HTML_TOOL_NAME = "present_lesson_html"
@@ -22,7 +23,8 @@ FALLBACK_RULES = (
     "When the learner has met the required success criterion, call the MCP tool "
     "record_lesson_success with evidence for that criterion. "
     "Never invent a mark-complete shortcut. The success gate is the only way to bank the lesson. "
-    "Call present_lesson_html for exposition-only HTML; keep all probes in this chat."
+    "On the first tutor turn, ask one diagnostic in this chat and call "
+    "present_lesson_html with exposition-only HTML in the same turn; keep all probes in this chat."
 )
 
 T = TypeVar("T")
@@ -97,9 +99,17 @@ def is_gate_tool(event: ToolCallEvent) -> bool:
 
 
 def is_present_html_tool(event: ToolCallEvent) -> bool:
+    if getattr(event, "is_success_gate", False) or _tool_name_in_event(event, GATE_TOOL_NAME):
+        return False
     if getattr(event, "is_present_html", False):
         return True
-    return _tool_name_in_event(event, PRESENT_HTML_TOOL_NAME)
+    if _tool_name_in_event(event, PRESENT_HTML_TOOL_NAME):
+        return True
+    if parse_present_html(event.raw_input) is not None:
+        return True
+    if event.raw_output is not None and parse_present_html(event.raw_output) is not None:
+        return True
+    return False
 
 
 def _tool_name_in_event(event: ToolCallEvent, name: str) -> bool:
