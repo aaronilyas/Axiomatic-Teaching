@@ -1,6 +1,6 @@
 # Axiomatic Teaching
 
-A Textual TUI that sits between a human learner and [Grok Build](https://docs.x.ai/build/overview), driven exclusively over the Agent Client Protocol (ACP). The TUI is the only learner-facing UI. Knowledge is banked if and only if the MCP tool `record_lesson_success` accepts evidence that satisfies the lesson's success criterion stored in SQLite.
+A Textual TUI that sits between a human learner and [Grok Build](https://docs.x.ai/build/overview), driven exclusively over the Agent Client Protocol (ACP). ChatStream is the only surface for questions. Initial reading may open as self-contained HTML in the system browser; there is no embedded webview. Knowledge is banked if and only if the MCP tool `record_lesson_success` accepts evidence that satisfies the lesson's success criterion stored in SQLite.
 
 There is no “mark complete” button. Completions, concepts, style notes, and FSRS cards are written only when the success gate passes.
 
@@ -61,6 +61,7 @@ From Home, select an active lesson and press Enter or `s`.
 - The TUI starts an ACP session with Grok Build: `grok agent --always-approve stdio` (or the echo agent in `--demo`).
 - `session/new` attaches the axiomatic MCP server (stdio) and injects a small pedagogical context: the current success criterion, a few related **banked** lessons, 1-hop connections, style notes, and due reviews (hard-capped; the current criterion is never truncated; long descriptions are capped).
 - A short kickoff prompt asks Grok for one diagnostic question and to wait. Subsequent input is `session/prompt`.
+- After diagnostics, Grok may call `present_lesson_html`. The TUI writes a self-contained page into `lessons/<id>/present-NNN.html` and opens it with the system browser (`file://`). The ACP session stays live. Understanding-measurement questions stay in ChatStream — the HTML page is exposition only.
 - The center pane streams agent text, dim thought lines, and tool-call cards (`record_lesson_success` is highlighted). The right pane shows the success description, the derived min-chars/keywords, and the last gate result. A failed gate marks the criterion ✗ (never a false all-green). Older lessons that still have more than one criterion are listed the same way.
 
 Session working directory is a per-lesson folder under the app data dir (`lessons/<id>/`), not this repository.
@@ -88,7 +89,7 @@ A second successful call returns `already_banked` and does not insert another co
 
 The gate checks the evidence payload against the stored criteria. It cannot prove that the text was spoken by the learner — that honesty rule is in the pedagogy injected into Grok. Short or keyword-missing payloads are still rejected, including over a live Grok ACP session.
 
-Read-only companion tools: `get_lesson_criteria`, `list_banked_lessons`, `get_connections`. Learners never invoke these; Grok does, through the TUI session.
+Companion tools: `get_lesson_criteria`, `list_banked_lessons`, `get_connections` (read-only), and `present_lesson_html` (TUI writes HTML and opens the system browser; not a knowledge write). Learners never invoke these; Grok does, through the TUI session.
 
 ## Configuration
 

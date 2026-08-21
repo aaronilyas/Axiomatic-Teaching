@@ -22,7 +22,18 @@ from axiomatic_teaching.acp_client.events import (
 )
 from axiomatic_teaching.graph.queries import select_related_banked
 from axiomatic_teaching.models import GateResult, Lesson, LessonStatus
-from axiomatic_teaching.tui import is_gate_tool, parse_gate_result
+from axiomatic_teaching.present import (
+    ERROR_EMPTY,
+    ERROR_NO_WORKSPACE,
+    ERROR_REJECTED,
+    ERROR_TOOL_FAILED,
+    ERROR_WRITE,
+    PresentHtmlRequest,
+    deliver_present,
+    parse_present_html,
+    parse_present_output,
+)
+from axiomatic_teaching.tui import is_gate_tool, is_present_html_tool, parse_gate_result
 from axiomatic_teaching.tui.widgets.chat_stream import ChatStream
 from axiomatic_teaching.tui.widgets.connections_panel import ConnectionsPanel
 from axiomatic_teaching.tui.widgets.criteria_panel import CriteriaPanel
@@ -49,6 +60,8 @@ class StudyScreen(Screen[None]):
         self.lesson = lesson
         self.session: SessionController | None = None
         self._starting = False
+        self._presented_tool_ids: set[str] = set()
+        self._present_args: dict[str, PresentHtmlRequest] = {}
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -120,6 +133,8 @@ class StudyScreen(Screen[None]):
                 gate = parse_gate_result(event.raw_output)
                 if gate is not None:
                     self._apply_gate(gate)
+            elif is_present_html_tool(event):
+                self._present_html_event(event)
         elif isinstance(event, PlanEvent):
             chat.append_plan(event)
         elif isinstance(event, AgentStatus):
@@ -184,6 +199,58 @@ class StudyScreen(Screen[None]):
             pass
         self.app.refresh_counts()
         self.query_one(StatusBar).refresh_status()
+
+    def _present_html_event(self, event: ToolCallEvent) -> None:
+        status = (event.status or "").lower()
+        call_id = event.tool_call_id or ""
+        if call_id and call_id in self._presented_tool_ids:
+            return
+        request = parse_present_html(event.raw_input) or parse_present_html(event.raw_output)
+        if request is not None and call_id:
+            self._present_args[call_id] = request
+        if status in {"pending", "in_progress"}:
+            return
+        chat = self.query_one(ChatStream)
+        if status == "failed":
+            if call_id:
+                self._presented_tool_ids.add(call_id)
+                self._present_args.pop(call_id, None)
+            chat.write_system(ERROR_TOOL_FAILED)
+            return
+        if status and status not in {"completed", "success"}:
+            return
+        rejected = parse_present_output(event.raw_output)
+        if rejected is not None and rejected.get("ok") is False:
+            if call_id:
+                self._presented_tool_ids.add(call_id)
+                self._present_args.pop(call_id, None)
+            reason = str(rejected.get("error") or rejected.get("message") or "rejected")
+            chat.write_system(ERROR_REJECTED.format(reason=reason.rstrip(".")))
+            return
+        lesson = self.lesson
+        if lesson is None:
+            chat.write_system(ERROR_NO_WORKSPACE)
+            return
+        if request is None and call_id:
+            request = self._present_args.get(call_id)
+        if request is None:
+            chat.write_system(ERROR_EMPTY)
+            return
+        if call_id:
+            self._presented_tool_ids.add(call_id)
+            self._present_args.pop(call_id, None)
+        if not request.title.strip():
+            request = PresentHtmlRequest(
+                html=request.html, title=lesson.title, css=request.css
+            )
+        workspace = self.app.settings.workspace_for(lesson.id)
+        demo = bool(getattr(self.app.settings, "demo", False))
+        try:
+            result = deliver_present(workspace, request, open_browser=not demo)
+        except Exception as exc:
+            chat.write_system(ERROR_WRITE.format(exc=exc))
+            return
+        chat.write_system(result.message)
 
     def _apply_gate(self, result: GateResult) -> None:
         self.app.last_gate = result
@@ -367,6 +434,8 @@ class StudyScreen(Screen[None]):
         await self._shutdown_session()
         self.lesson = lesson
         self.sub_title = lesson.title
+        self._presented_tool_ids.clear()
+        self._present_args.clear()
         self.query_one(ChatStream).reset()
         self._refresh_panels()
         if self.app.session_factory is None:

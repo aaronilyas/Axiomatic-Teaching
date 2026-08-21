@@ -177,14 +177,18 @@ class AxiomaticApp(App[None]):
             return (
                 f"This lesson titled {lesson.title} is already banked. Restudy only: "
                 "do not call record_lesson_success. Start with one diagnostic question. "
-                "The learner already sees the success criterion — do not recap it. Wait."
+                "The learner already sees the success criterion — do not recap it. "
+                "Wait. After they answer, you may call present_lesson_html for "
+                "exposition-only reading, then probe in this chat."
             )
         return (
             f"Begin the lesson titled {lesson.title}. "
             "Start with one diagnostic question at the edge of competence. "
             "The learner already sees the success criterion — do not recap it. "
             "Wait for their answer before teaching. Do not lecture. "
-            "Do not declare the lesson complete yourself."
+            "Do not declare the lesson complete yourself. "
+            "After they answer, you may call present_lesson_html for exposition-only "
+            "reading, then probe in this chat."
         )
 
     def list_lessons(self) -> list[Lesson]:

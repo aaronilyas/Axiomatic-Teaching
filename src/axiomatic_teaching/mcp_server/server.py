@@ -1,4 +1,4 @@
-"""stdio MCP server: the success gate plus read-only lesson tools."""
+"""stdio MCP server: the success gate, read-only lesson tools, and HTML present."""
 
 from __future__ import annotations
 
@@ -20,6 +20,13 @@ from axiomatic_teaching.models import (
     UnmetCriterion,
 )
 from axiomatic_teaching.paths import default_db_path
+from axiomatic_teaching.present import (
+    CSS_MAX_CHARS,
+    HTML_MAX_CHARS,
+    MAX_PRESENT_BYTES,
+    TITLE_MAX_CHARS,
+    wrap_lesson_html,
+)
 
 _REPO: SqlRepository | None = None
 _REPO_PATH: Path | None = None
@@ -31,6 +38,19 @@ RECORD_LESSON_SUCCESS_DESCRIPTION = (
     "This tool rejects incomplete evidence (missing required items, too-short text, "
     "missing keywords, or met=false). This is the only way to bank knowledge — there "
     "is no other write path for completions, concepts, or style notes."
+)
+
+PRESENT_LESSON_HTML_DESCRIPTION = (
+    "Show a self-contained lesson figure in the learner's default browser. "
+    "Pass HTML (fragment or full document) plus an optional title and optional CSS. "
+    "The TUI writes one file into this lesson's workspace and opens it via file://. "
+    "This ACP session stays live. Chat in the TUI is the only place to ask questions "
+    "— do not put questions, quizzes, forms, or JavaScript in the HTML. "
+    "A return with ok=true means the host will write the file and open a tab; "
+    "open_status will be host_pending and opened will be null because the TUI opens "
+    "after this tool returns. Do not wait for a click on the page; keep teaching in "
+    "this chat. Call again to show a new figure; each call is a new file and a new tab. "
+    "Do not use this tool to bank knowledge — that remains record_lesson_success."
 )
 
 
@@ -201,6 +221,87 @@ def get_connections() -> dict[str, Any]:
     }
 
 
+def _present_error(
+    lesson_id: str | None,
+    error: str,
+    *,
+    title: str = "",
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "lesson_id": lesson_id,
+        "title": title,
+        "bytes": 0,
+        "is_full_document": False,
+        "css_inlined": False,
+        "scripts_stripped": False,
+        "host_action": "none",
+        "open_status": "not_attempted",
+        "opened": None,
+        "written": False,
+        "filename": None,
+        "path": None,
+        "file_url": None,
+        "message": error if error.endswith(".") else f"{error}.",
+        "error": error,
+    }
+
+
+def present_lesson_html(html: str, title: str = "", css: str = "") -> dict[str, Any]:
+    """Validate an initial-reading HTML figure. The TUI writes the file and opens it."""
+    lesson_id = _current_lesson_id()
+    if lesson_id is None:
+        return _present_error(None, "AXIOMATIC_LESSON_ID is not set")
+    html_text = html if isinstance(html, str) else str(html or "")
+    title_text = title if isinstance(title, str) else str(title or "")
+    css_text = css if isinstance(css, str) else str(css or "")
+    if not html_text.strip():
+        return _present_error(lesson_id, "html must not be empty", title=title_text)
+    if len(html_text) > HTML_MAX_CHARS:
+        return _present_error(
+            lesson_id, f"html exceeds {HTML_MAX_CHARS} characters", title=title_text
+        )
+    if len(css_text) > CSS_MAX_CHARS:
+        return _present_error(
+            lesson_id, f"css exceeds {CSS_MAX_CHARS} characters", title=title_text
+        )
+    if len(title_text) > TITLE_MAX_CHARS:
+        return _present_error(
+            lesson_id, f"title exceeds {TITLE_MAX_CHARS} characters", title=title_text
+        )
+    try:
+        wrapped = wrap_lesson_html(html_text, title_text, css_text)
+    except Exception as exc:
+        return _present_error(lesson_id, f"could not assemble HTML: {exc}", title=title_text)
+    byte_count = len(wrapped.document.encode("utf-8"))
+    if byte_count > MAX_PRESENT_BYTES:
+        return _present_error(
+            lesson_id, "html exceeds maximum size after wrapping", title=title_text
+        )
+    return {
+        "ok": True,
+        "lesson_id": lesson_id,
+        "title": wrapped.title,
+        "bytes": byte_count,
+        "is_full_document": wrapped.is_full_document,
+        "css_inlined": wrapped.css_inlined,
+        "scripts_stripped": wrapped.scripts_stripped,
+        "host_action": "write_and_open",
+        "open_status": "host_pending",
+        "opened": None,
+        "written": False,
+        "filename": None,
+        "path": None,
+        "file_url": None,
+        "message": (
+            "Accepted. The TUI will write a self-contained HTML file into this "
+            "lesson workspace and open the default browser. Keep asking questions "
+            "in this chat; do not wait for a click on the page."
+        ),
+        "error": None,
+    }
+
+
 def _make_mcp():
     try:
         from mcp.server.fastmcp import FastMCP
@@ -221,6 +322,7 @@ def _make_mcp():
     mcp.tool(
         description="Return 1-hop concept relations around the current lesson."
     )(get_connections)
+    mcp.tool(description=PRESENT_LESSON_HTML_DESCRIPTION)(present_lesson_html)
     return mcp
 
 

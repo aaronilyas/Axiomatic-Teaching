@@ -13,6 +13,7 @@ from axiomatic_teaching.acp_client.events import ToolCallEvent
 from axiomatic_teaching.models import Concept, ConceptRelation, GateResult
 
 GATE_TOOL_NAME = "record_lesson_success"
+PRESENT_HTML_TOOL_NAME = "present_lesson_html"
 
 FALLBACK_RULES = (
     "You are a Socratic tutor inside Axiomatic Teaching. "
@@ -20,7 +21,8 @@ FALLBACK_RULES = (
     "Teach the current lesson. Do not claim the lesson is complete. "
     "When the learner has met the required success criterion, call the MCP tool "
     "record_lesson_success with evidence for that criterion. "
-    "Never invent a mark-complete shortcut. The success gate is the only way to bank the lesson."
+    "Never invent a mark-complete shortcut. The success gate is the only way to bank the lesson. "
+    "Call present_lesson_html for exposition-only HTML; keep all probes in this chat."
 )
 
 T = TypeVar("T")
@@ -91,18 +93,30 @@ def invoke_flexible(fn: Callable[..., T], available: Mapping[str, Any]) -> T:
 def is_gate_tool(event: ToolCallEvent) -> bool:
     if event.is_success_gate:
         return True
+    return _tool_name_in_event(event, GATE_TOOL_NAME)
+
+
+def is_present_html_tool(event: ToolCallEvent) -> bool:
+    if getattr(event, "is_present_html", False):
+        return True
+    return _tool_name_in_event(event, PRESENT_HTML_TOOL_NAME)
+
+
+def _tool_name_in_event(event: ToolCallEvent, name: str) -> bool:
     blob = " ".join(
         part
         for part in (event.title, event.kind, event.tool_call_id)
         if part
     ).lower()
-    if GATE_TOOL_NAME in blob:
+    if name in blob:
         return True
-    raw = event.raw_input
-    if isinstance(raw, dict):
-        name = str(raw.get("name") or raw.get("tool") or raw.get("toolName") or "")
-        if GATE_TOOL_NAME in name.lower():
-            return True
+    for raw in (event.raw_input, event.raw_output):
+        if isinstance(raw, dict):
+            label = str(
+                raw.get("name") or raw.get("tool") or raw.get("toolName") or raw.get("tool_name") or ""
+            )
+            if name in label.lower():
+                return True
     return False
 
 

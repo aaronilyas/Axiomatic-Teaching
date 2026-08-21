@@ -23,7 +23,7 @@ from axiomatic_teaching.models import (
     RecordSuccessRequest,
     UnmetCriterion,
 )
-from axiomatic_teaching.tui import parse_gate_result
+from axiomatic_teaching.tui import is_gate_tool, is_present_html_tool, parse_gate_result
 from axiomatic_teaching.tui.widgets.criteria_panel import _format_panel, _mark
 from axiomatic_teaching.tui.screens.confirm_delete import ConfirmDeleteScreen
 from axiomatic_teaching.tui.screens.home import HomeScreen
@@ -572,3 +572,327 @@ def test_parse_gate_result_unwraps_grok_mcp_envelope() -> None:
     assert result.accepted is False
     assert result.lesson_id == "abc"
     assert result.unmet and result.unmet[0].criterion_id == "c1"
+
+
+def test_parse_gate_result_ignores_present_payload() -> None:
+    payload = {
+        "ok": True,
+        "lesson_id": "abc",
+        "open_status": "host_pending",
+        "host_action": "write_and_open",
+        "title": "Bayes plate",
+    }
+    assert parse_gate_result(payload) is None
+
+
+def test_present_page_title_does_not_trip_gate() -> None:
+    from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+    event = ToolCallEvent(
+        tool_call_id="p",
+        title="present_lesson_html",
+        status="completed",
+        raw_input={"html": "<p>x</p>", "title": "record_lesson_success"},
+        is_present_html=True,
+    )
+    assert is_present_html_tool(event)
+    assert is_gate_tool(event) is False
+
+
+def _chat_text(chat: ChatStream) -> str:
+    """Join RichLog lines and flatten segment text so wrapped system lines stay searchable."""
+    chunks: list[str] = []
+    plains: list[str] = []
+    for line in getattr(chat, "lines", []):
+        chunks.append(str(line))
+        segments = getattr(line, "_segments", None)
+        if segments:
+            plains.append("".join(getattr(seg, "text", "") for seg in segments))
+    return "\n".join(chunks) + "\n" + "".join(plains)
+
+
+def _study_lesson(repository, title: str = "Queues"):
+    return repository.create_lesson(
+        NewLessonSpec(
+            title=title,
+            topic="data-structures",
+            criteria=[
+                CriterionDraft(
+                    statement="Define a queue using FIFO.",
+                    required=True,
+                    keywords=["fifo"],
+                )
+            ],
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_present_html_event_writes_file_in_demo(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "webbrowser.open_new_tab",
+        lambda uri: opened.append(uri) or True,
+    )
+    app, repository = _app(tmp_path)
+    lesson = _study_lesson(repository, "Bayes")
+    marker = "UNIQUE_FRAGMENT_MARKER_XYZ"
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="p1",
+                title="present_lesson_html",
+                status="pending",
+                raw_input={"html": f"<p>{marker}</p>", "title": "Bayes plate"},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        workspace = tmp_path / "lessons" / lesson.id
+        assert list(workspace.glob("present-*.html")) == [] if workspace.exists() else True
+
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="p1",
+                title="present_lesson_html",
+                status="completed",
+                raw_input={"html": f"<p>{marker}</p>", "title": "Bayes plate"},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="p1",
+                title="present_lesson_html",
+                status="completed",
+                raw_input={"html": f"<p>{marker}</p>", "title": "Bayes plate"},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        files = list(workspace.glob("present-*.html"))
+        assert len(files) == 1
+        assert files[0].name == "present-001.html"
+        body = files[0].read_text(encoding="utf-8")
+        assert marker in body
+        assert "<!DOCTYPE html>" in body
+        chat = _chat_text(app.screen.query_one(ChatStream))
+        assert "Return here when you're ready" in chat
+        assert "Demo mode" in chat
+        assert marker not in chat
+        assert opened == []
+
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="p2",
+                title="present_lesson_html",
+                status="completed",
+                raw_input={"html": "<p>second figure</p>", "title": "Second"},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        names = sorted(path.name for path in workspace.glob("present-*.html"))
+        assert names == ["present-001.html", "present-002.html"]
+
+
+@pytest.mark.asyncio
+async def test_present_html_retries_after_empty_payload(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    app, repository = _app(tmp_path)
+    lesson = _study_lesson(repository, "Retry")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="late",
+                title="present_lesson_html",
+                status="completed",
+                raw_input={},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        workspace = tmp_path / "lessons" / lesson.id
+        assert list(workspace.glob("present-*.html")) == [] if workspace.exists() else True
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="late",
+                title="present_lesson_html",
+                status="completed",
+                raw_input={"html": "<p>arrived later</p>", "title": "Late"},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        files = list(workspace.glob("present-*.html"))
+        assert len(files) == 1
+        assert "arrived later" in files[0].read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_present_html_uses_pending_html_when_completed_omits_input(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    app, repository = _app(tmp_path)
+    lesson = _study_lesson(repository, "Patch")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="patch",
+                title="present_lesson_html",
+                status="pending",
+                raw_input={"html": "<p>from pending</p>", "title": "Pending fig"},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        workspace = tmp_path / "lessons" / lesson.id
+        assert list(workspace.glob("present-*.html")) == [] if workspace.exists() else True
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="patch",
+                title="present_lesson_html",
+                status="completed",
+                raw_input={},
+                raw_output={"ok": True, "open_status": "host_pending", "opened": None},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        files = list(workspace.glob("present-*.html"))
+        assert len(files) == 1
+        assert "from pending" in files[0].read_text(encoding="utf-8")
+        chat = _chat_text(app.screen.query_one(ChatStream))
+        assert "Return here when" in chat
+
+
+@pytest.mark.asyncio
+async def test_present_html_opens_browser_when_not_demo(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "webbrowser.open_new_tab",
+        lambda uri: opened.append(uri) or True,
+    )
+    db = tmp_path / "axiomatic.db"
+    settings = Settings.from_cli(db=db, demo=False)
+    repository = create_repository(db)
+    app = AxiomaticApp(settings, repository, session_factory=None)
+    lesson = _study_lesson(repository, "Stacks")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="open1",
+                title="present_lesson_html",
+                status="completed",
+                raw_input={"html": "<p>stack figure</p>", "title": "Stack"},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        assert len(opened) == 1
+        assert opened[0].startswith("file://")
+        assert "present-001.html" in opened[0]
+        chat = _chat_text(app.screen.query_one(ChatStream))
+        assert "opened in your browser" in chat.lower()
+        assert "Demo mode" not in chat
+
+
+@pytest.mark.asyncio
+async def test_present_html_rejected_mcp_does_not_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    app, repository = _app(tmp_path)
+    lesson = _study_lesson(repository, "Reject")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="bad",
+                title="present_lesson_html",
+                status="completed",
+                raw_input={"html": "<p>should not write</p>"},
+                raw_output={"ok": False, "error": "html must not be empty"},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        workspace = tmp_path / "lessons" / lesson.id
+        assert list(workspace.glob("present-*.html")) == [] if workspace.exists() else True
+        chat = _chat_text(app.screen.query_one(ChatStream))
+        assert "html must not be empty" in chat
+        assert isinstance(app.screen, StudyScreen)
+
+
+@pytest.mark.asyncio
+async def test_present_html_write_failure_keeps_session(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    app, repository = _app(tmp_path)
+    lesson = _study_lesson(repository, "WriteFail")
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("axiomatic_teaching.tui.screens.study.deliver_present", boom)
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="wf",
+                title="present_lesson_html",
+                status="completed",
+                raw_input={"html": "<p>nope</p>"},
+                is_present_html=True,
+            )
+        )
+        await pilot.pause()
+        chat = _chat_text(app.screen.query_one(ChatStream))
+        assert "Could not present" in chat
+        assert "disk full" in chat
+        assert isinstance(app.screen, StudyScreen)
+        from axiomatic_teaching.tui.widgets.input_bar import InputBar
+
+        bar = app.screen.query_one(InputBar)
+        bar.query_one("#prompt").text = "still here"
+        app.screen.action_send()
+        await pilot.pause()
+        chat = _chat_text(app.screen.query_one(ChatStream))
+        assert "not connected" in chat.lower() or "ACP" in chat

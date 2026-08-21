@@ -35,6 +35,7 @@ class ToolCallEvent:
     raw_output: dict[str, Any] | None = None
     session_id: str = ""
     is_success_gate: bool = False
+    is_present_html: bool = False
 
 
 @dataclass(slots=True)

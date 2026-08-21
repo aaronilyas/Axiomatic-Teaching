@@ -404,6 +404,15 @@ def test_kickoff_prompt_mentions_title() -> None:
     assert CURRENT_TITLE in prompt
     assert "diagnostic question" in prompt
     assert "already sees" in prompt
+    assert "present_lesson_html" in prompt
+
+
+def test_assemble_includes_html_present_rules() -> None:
+    repo = FakeRepository()
+    text = assemble(repo, repo.current)
+    assert "present_lesson_html" in text
+    assert "Initial reading" in text
+    assert "not evidence" in text.lower()
 
 
 def test_kickoff_prompt_restudy_for_completed() -> None:

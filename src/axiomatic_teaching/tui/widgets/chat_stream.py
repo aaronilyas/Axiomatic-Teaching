@@ -15,7 +15,7 @@ from axiomatic_teaching.acp_client.events import (
     ThoughtChunk,
     ToolCallEvent,
 )
-from axiomatic_teaching.tui import is_gate_tool
+from axiomatic_teaching.tui import is_gate_tool, is_present_html_tool
 
 
 class ChatStream(RichLog):
@@ -67,6 +67,7 @@ class ChatStream(RichLog):
     def append_tool(self, event: ToolCallEvent) -> None:
         self._flush_stream()
         gate = is_gate_tool(event)
+        present = (not gate) and is_present_html_tool(event)
         title = event.title or event.kind or event.tool_call_id or "tool"
         status = event.status or "pending"
         heading = "GATE" if gate else "TOOL"
@@ -77,7 +78,14 @@ class ChatStream(RichLog):
             )
             return
         detail_lines = [f"[bold]{escape(title)}[/]", f"[dim]{escape(status)}[/]"]
-        if event.raw_output is not None:
+        if present:
+            label = "lesson page"
+            if isinstance(event.raw_input, dict):
+                given = str(event.raw_input.get("title") or "").strip()
+                if given and given.lower() != "present_lesson_html":
+                    label = given
+            detail_lines.append(f"[dim]{escape(label)}[/]")
+        elif event.raw_output is not None:
             preview = _preview(event.raw_output)
             if preview:
                 detail_lines.append(preview)

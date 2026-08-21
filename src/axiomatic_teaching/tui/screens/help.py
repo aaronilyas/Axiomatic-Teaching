@@ -51,6 +51,7 @@ _HELP = """[bold]Home[/]
   [cyan]ctrl+s[/]     send
   [cyan]ctrl+c[/]     cancel turn
   [cyan]esc[/]        back (shutdown session)
+  The tutor may open an initial reading in your browser; questions stay here.
   Completion is only via the [cyan]record_lesson_success[/] gate.
   Demo mode cannot bank; use Grok Build for the live gate.
 

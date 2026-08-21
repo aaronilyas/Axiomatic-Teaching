@@ -93,6 +93,7 @@ _MCP_ENV_PASSTHROUGH = (
     "HOMEDRIVE",
     "HOMEPATH",
     "HOME",
+    "XDG_DATA_HOME",
     "TEMP",
     "TMP",
     "TMPDIR",
@@ -127,9 +128,12 @@ def _mcp_env(settings: Settings, lesson_id: str) -> list[Any]:
         if name.startswith("PYTHON") and name not in seen:
             seen.add(name)
             variables.append(EnvVariable(name=name, value=value))
+    from axiomatic_teaching.paths import app_data_dir
+
     overrides = {
         "AXIOMATIC_DB": str(settings.db_path),
         "AXIOMATIC_LESSON_ID": lesson_id,
+        "AXIOMATIC_HOME": str(app_data_dir()),
         "PYTHONPATH": pythonpath,
         "PYTHONUNBUFFERED": "1",
     }

@@ -13,6 +13,7 @@ from axiomatic_teaching.mcp_server.server import (
     get_connections,
     get_lesson_criteria,
     list_banked_lessons,
+    present_lesson_html,
     record_lesson_success,
     reset_repository_cache,
 )
@@ -166,3 +167,84 @@ def test_mcp_repository_is_cached(tmp_path: Path, monkeypatch) -> None:
     first = _repository()
     second = _repository()
     assert first is second
+
+
+def test_present_lesson_html_validates_and_does_not_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    _repo, lesson = _make_lesson(tmp_path, monkeypatch)
+    _ = _repo
+
+    empty = present_lesson_html(html="  ", title="Bayes")
+    assert empty["ok"] is False
+    assert empty["written"] is False
+    assert empty["opened"] is None
+    assert empty["open_status"] == "not_attempted"
+    assert "empty" in empty["error"]
+
+    ok = present_lesson_html(
+        html="<p>Bayes updates a prior with evidence.</p>",
+        title="Bayes plate",
+        css="p { max-width: 40rem; }",
+    )
+    assert ok["ok"] is True
+    assert ok["lesson_id"] == lesson.id
+    assert ok["title"] == "Bayes plate"
+    assert ok["written"] is False
+    assert ok["opened"] is None
+    assert ok["open_status"] == "host_pending"
+    assert ok["host_action"] == "write_and_open"
+    assert ok["is_full_document"] is False
+    assert ok["css_inlined"] is True
+    assert ok["bytes"] > 0
+    assert "accepted" not in ok
+    workspace = tmp_path / "lessons" / lesson.id
+    assert list(workspace.glob("present-*.html")) == [] if workspace.exists() else True
+    assert list(tmp_path.rglob("present-*.html")) == []
+
+
+def test_present_lesson_html_requires_lesson_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AXIOMATIC_LESSON_ID", raising=False)
+    result = present_lesson_html(html="<p>Hi</p>")
+    assert result["ok"] is False
+    assert "AXIOMATIC_LESSON_ID" in result["error"]
+    assert result["host_action"] == "none"
+
+
+def test_present_lesson_html_does_not_bank(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, lesson = _make_lesson(tmp_path, monkeypatch)
+    result = present_lesson_html(html="<p>A figure is not evidence.</p>", title="Fig")
+    assert result["ok"] is True
+    assert repo.get_completion(lesson.id) is None
+    assert repo.get_lesson(lesson.id).status.value == "active"
+    assert repo.list_concepts() == []
+    assert repo.list_style_notes() == []
+
+
+def test_present_lesson_html_rejects_oversize_wrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _make_lesson(tmp_path, monkeypatch)
+    monkeypatch.setattr("axiomatic_teaching.mcp_server.server.MAX_PRESENT_BYTES", 80)
+    result = present_lesson_html(html="<p>hello world this will wrap larger</p>")
+    assert result["ok"] is False
+    assert "maximum size" in result["error"]
+    assert result["written"] is False
+
+
+def test_present_lesson_html_full_document_stats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _make_lesson(tmp_path, monkeypatch)
+    html = (
+        "<!DOCTYPE html><html><head><title>Old</title></head>"
+        "<body><h1>Full</h1></body></html>"
+    )
+    result = present_lesson_html(html=html, title="")
+    assert result["ok"] is True
+    assert result["is_full_document"] is True
+    assert result["css_inlined"] is False
+    assert result["written"] is False

@@ -39,6 +39,7 @@ from axiomatic_teaching.acp_client.events import PlanEvent, StreamChunk, Thought
 log = logging.getLogger(__name__)
 
 _SUCCESS_GATE = "record_lesson_success"
+_PRESENT_HTML = "present_lesson_html"
 
 
 def _content_text(content: Any) -> str:
@@ -84,22 +85,45 @@ def _prefer_allow(options: list[PermissionOption]) -> PermissionOption:
     return options[0]
 
 
+def _mentions_tool(
+    needle: str,
+    title: str,
+    kind: str,
+    raw_input: dict[str, Any],
+    raw_output: dict[str, Any] | None = None,
+    extra: str = "",
+) -> bool:
+    parts = [title, kind, extra]
+    blobs = [raw_input]
+    if raw_output:
+        blobs.append(raw_output)
+    for blob in blobs:
+        # Do not scan argument `title` (present_lesson_html's page title).
+        for key in ("name", "tool", "toolName", "tool_name"):
+            value = blob.get(key)
+            if value:
+                parts.append(str(value))
+    return needle in " ".join(parts).lower()
+
+
 def _is_success_gate(
     title: str,
     kind: str,
     raw_input: dict[str, Any],
     raw_output: dict[str, Any] | None = None,
+    extra: str = "",
 ) -> bool:
-    parts = [title, kind]
-    blobs = [raw_input]
-    if raw_output:
-        blobs.append(raw_output)
-    for blob in blobs:
-        for key in ("name", "tool", "title", "toolName", "tool_name"):
-            extra = blob.get(key)
-            if extra:
-                parts.append(str(extra))
-    return _SUCCESS_GATE in " ".join(parts).lower()
+    return _mentions_tool(_SUCCESS_GATE, title, kind, raw_input, raw_output, extra=extra)
+
+
+def _is_present_html(
+    title: str,
+    kind: str,
+    raw_input: dict[str, Any],
+    raw_output: dict[str, Any] | None = None,
+    extra: str = "",
+) -> bool:
+    return _mentions_tool(_PRESENT_HTML, title, kind, raw_input, raw_output, extra=extra)
 
 
 def _plan_entries(update: Any) -> list[str]:
@@ -124,6 +148,7 @@ class AxiomaticClient(Client):
 
     def __init__(self, on_event: Callable[[Any], None]) -> None:
         self._on_event = on_event
+        self._tool_calls: dict[str, dict[str, Any]] = {}
 
     def _emit(self, event: Any) -> None:
         try:
@@ -160,24 +185,45 @@ class AxiomaticClient(Client):
             self._emit(ThoughtChunk(text=_content_text(update.content), session_id=session_id))
             return
         if isinstance(update, (ToolCallStart, ToolCallProgress, ToolCallUpdate)):
-            title = getattr(update, "title", None) or ""
-            kind = str(getattr(update, "kind", None) or "")
-            raw_input = _as_dict(getattr(update, "raw_input", None))
+            tool_call_id = str(getattr(update, "tool_call_id", "") or "")
+            prev = self._tool_calls.get(tool_call_id, {})
+            title = getattr(update, "title", None) or prev.get("title") or ""
+            kind = str(getattr(update, "kind", None) or prev.get("kind") or "")
+            name = str(getattr(update, "name", None) or prev.get("name") or "")
+            incoming_input = getattr(update, "raw_input", None)
+            if incoming_input is not None:
+                parsed_input = _as_dict(incoming_input)
+                raw_input = parsed_input or dict(prev.get("raw_input") or {})
+            else:
+                raw_input = dict(prev.get("raw_input") or {})
             raw_output_val = getattr(update, "raw_output", None)
             raw_output = _as_dict(raw_output_val) if raw_output_val is not None else None
             status = getattr(update, "status", None)
             if not status:
                 status = "pending" if isinstance(update, ToolCallStart) else "in_progress"
+            self._tool_calls[tool_call_id] = {
+                "title": title,
+                "kind": kind,
+                "name": name,
+                "raw_input": raw_input,
+            }
+            if str(status) in {"completed", "failed"}:
+                self._tool_calls.pop(tool_call_id, None)
             self._emit(
                 ToolCallEvent(
-                    tool_call_id=str(getattr(update, "tool_call_id", "") or ""),
+                    tool_call_id=tool_call_id,
                     title=title,
                     kind=kind,
                     status=str(status),
                     raw_input=raw_input,
                     raw_output=raw_output,
                     session_id=session_id,
-                    is_success_gate=_is_success_gate(title, kind, raw_input, raw_output),
+                    is_success_gate=_is_success_gate(
+                        title, kind, raw_input, raw_output, extra=name
+                    ),
+                    is_present_html=_is_present_html(
+                        title, kind, raw_input, raw_output, extra=name
+                    ),
                 )
             )
             return
