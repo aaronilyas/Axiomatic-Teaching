@@ -13,8 +13,6 @@ from typing import Any
 
 from axiomatic_teaching.config import Settings
 from axiomatic_teaching.models import (
-    CriterionDraft,
-    CriterionKind,
     EvidenceItem,
     LessonStatus,
     NewLessonSpec,
@@ -67,8 +65,9 @@ def build_parser() -> argparse.ArgumentParser:
         "verify",
         help="Run the headless critical-path verifier (no TUI, no Grok).",
         description=(
-            "Create a lesson, reject insufficient evidence, bank sufficient "
-            "evidence, and assert already-banked idempotency."
+            "Create a lesson from title/topic plus an optional success description, "
+            "reject insufficient evidence, bank sufficient evidence, and assert "
+            "already-banked idempotency."
         ),
     )
     # SUPPRESS so `axiomatic-teach --db PATH verify` is not overwritten by the
@@ -164,48 +163,26 @@ def _run_critical_path(repository: Any) -> None:
         description="Critical-path verifier lesson.",
         success_description="Explain recursion and trace a recursive call to a base case.",
         tags=["verify", "recursion"],
-        criteria=[
-            CriterionDraft(
-                kind=CriterionKind.EXPLAIN,
-                statement="Explain recursion in your own words, including the base case.",
-                required=True,
-                min_evidence_chars=40,
-                keywords=["recursion"],
-            ),
-            CriterionDraft(
-                kind=CriterionKind.APPLY,
-                statement="Trace a small recursive function down to its base case.",
-                required=True,
-                min_evidence_chars=40,
-                keywords=[],
-            ),
-        ],
     )
     lesson = repository.create_lesson(spec)
     criteria = list(getattr(lesson, "criteria", None) or [])
-    if len(criteria) < 2:
-        listed = repository.list_criteria(lesson.id)
-        criteria = list(listed)
-    _check(len(criteria) >= 2, "create_lesson did not persist two success criteria")
-
-    keyword_criterion = next(
-        (c for c in criteria if any(k.lower() == "recursion" for k in (c.keywords or []))),
-        criteria[0],
+    if not criteria:
+        criteria = list(repository.list_criteria(lesson.id))
+    _check(len(criteria) == 1, "create_lesson did not persist the auto-derived criterion")
+    criterion = criteria[0]
+    _check(criterion.required is True, "auto-derived criterion must be required")
+    _check(
+        any(k.lower() == "recursion" for k in (criterion.keywords or [])),
+        f"auto-derived keywords missing 'recursion': {criterion.keywords!r}",
     )
-    other_criterion = next(c for c in criteria if c.id != keyword_criterion.id)
 
     bad = RecordSuccessRequest(
         lesson_id=lesson.id,
         evidence=[
             EvidenceItem(
-                criterion_id=keyword_criterion.id,
+                criterion_id=criterion.id,
                 text="too short",
                 met=True,
-            ),
-            EvidenceItem(
-                criterion_id=other_criterion.id,
-                text="The learner did not demonstrate this criterion.",
-                met=False,
             ),
         ],
         notes="insufficient evidence",
@@ -230,25 +207,44 @@ def _run_critical_path(repository: Any) -> None:
         f"lesson status after reject is {after_fail.status!r}, expected active",
     )
 
-    good_explain = (
+    long_but_missing = (
+        "A function keeps calling itself on a smaller input until it stops, "
+        "and that stopping condition is what makes the process terminate."
+    )
+    _check(len(long_but_missing.strip()) >= 50, "missing-keyword fixture is too short")
+    missing = RecordSuccessRequest(
+        lesson_id=lesson.id,
+        evidence=[
+            EvidenceItem(criterion_id=criterion.id, text=long_but_missing, met=True),
+        ],
+        notes="missing keywords",
+    )
+    rejected_kw = repository.record_success(missing)
+    _check(
+        rejected_kw.accepted is False,
+        f"keyword-missing evidence was accepted: {rejected_kw}",
+    )
+    _check(
+        repository.get_completion(lesson.id) is None,
+        "completion row written on keyword-missing evidence",
+    )
+
+    good_text = (
         "Recursion is a function calling itself on a smaller input until a base "
-        "case stops the chain. Without a base case the calls would not terminate."
+        "case stops the chain. To trace a recursive call to factorial, walk down "
+        "to the base case and return."
     )
-    good_apply = (
-        "factorial(3) expands to 3 * factorial(2), then 3 * 2 * factorial(1), "
-        "and the base case n == 1 returns 1 so the product is 6."
-    )
-    _check(len(good_explain.strip()) >= 40, "verifier fixture explain text is too short")
-    _check("recursion" in good_explain.lower(), "verifier fixture missing keyword")
-    _check(len(good_apply.strip()) >= 40, "verifier fixture apply text is too short")
+    _check(len(good_text.strip()) >= 50, "verifier fixture evidence is too short")
+    folded = good_text.lower()
+    for keyword in criterion.keywords:
+        _check(keyword.lower() in folded, f"verifier fixture missing keyword {keyword!r}")
 
     good = RecordSuccessRequest(
         lesson_id=lesson.id,
         evidence=[
-            EvidenceItem(criterion_id=keyword_criterion.id, text=good_explain, met=True),
-            EvidenceItem(criterion_id=other_criterion.id, text=good_apply, met=True),
+            EvidenceItem(criterion_id=criterion.id, text=good_text, met=True),
         ],
-        notes="learner explained recursion and traced factorial",
+        notes="learner explained recursion and a base case",
         style_note="prefers tracing a concrete call tree",
     )
     accepted = repository.record_success(good)

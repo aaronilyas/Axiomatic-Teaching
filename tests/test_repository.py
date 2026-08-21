@@ -61,11 +61,14 @@ def test_create_lesson_assigns_uuids_and_active_status(tmp_path: Path) -> None:
     assert loaded.tags == ["t1"]
 
 
-def test_new_lesson_spec_rejects_empty_and_zero_min_chars() -> None:
+def test_new_lesson_spec_allows_empty_criteria_for_auto_build() -> None:
+    spec = NewLessonSpec(title="A", topic="B")
+    assert spec.criteria == []
+
+
+def test_new_lesson_spec_rejects_zero_min_chars_and_optional_only() -> None:
     from pydantic import ValidationError
 
-    with pytest.raises(ValidationError):
-        NewLessonSpec(title="A", topic="B", criteria=[])
     with pytest.raises(ValidationError):
         NewLessonSpec(
             title="A",
@@ -74,9 +77,15 @@ def test_new_lesson_spec_rejects_empty_and_zero_min_chars() -> None:
                 CriterionDraft(statement="x", required=True, min_evidence_chars=0)
             ],
         )
+    with pytest.raises(ValidationError, match="required criterion"):
+        NewLessonSpec(
+            title="A",
+            topic="B",
+            criteria=[CriterionDraft(statement="optional only", required=False)],
+        )
 
 
-def test_create_lesson_requires_required_criterion(tmp_path: Path) -> None:
+def test_create_lesson_rejects_optional_only_when_criteria_provided(tmp_path: Path) -> None:
     repo = create_repository(tmp_path / "db.sqlite")
     with pytest.raises(ValueError, match="required criterion"):
         repo.create_lesson(
@@ -87,8 +96,38 @@ def test_create_lesson_requires_required_criterion(tmp_path: Path) -> None:
                 )
             )
         )
-    with pytest.raises(ValueError, match="required criterion"):
-        repo.create_lesson(NewLessonSpec(title="A", topic="B", criteria=[]))
+
+
+def test_create_lesson_auto_builds_criterion_from_success_description(tmp_path: Path) -> None:
+    from axiomatic_teaching.config import AUTO_MIN_EVIDENCE_CHARS
+
+    repo = create_repository(tmp_path / "db.sqlite")
+    lesson = repo.create_lesson(
+        NewLessonSpec(
+            title="Recursion",
+            topic="algorithms",
+            success_description="Explain recursion with a base case.",
+        )
+    )
+    assert len(lesson.criteria) == 1
+    criterion = lesson.criteria[0]
+    assert criterion.required is True
+    assert criterion.min_evidence_chars == AUTO_MIN_EVIDENCE_CHARS
+    assert "recursion" in criterion.keywords
+    assert "base" in criterion.keywords
+    assert lesson.success_description.startswith("Explain recursion")
+
+
+def test_create_lesson_blank_success_uses_default_statement(tmp_path: Path) -> None:
+    from axiomatic_teaching.config import DEFAULT_SUCCESS_STATEMENT
+
+    repo = create_repository(tmp_path / "db.sqlite")
+    lesson = repo.create_lesson(NewLessonSpec(title="Recursion", topic="algorithms"))
+    assert lesson.success_description == DEFAULT_SUCCESS_STATEMENT
+    assert len(lesson.criteria) == 1
+    assert lesson.criteria[0].statement == DEFAULT_SUCCESS_STATEMENT
+    assert "recursion" in lesson.criteria[0].keywords
+    assert "algorithms" in lesson.criteria[0].keywords
 
 
 def test_foreign_key_cascade_deletes_criteria(tmp_path: Path) -> None:

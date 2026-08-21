@@ -15,6 +15,11 @@ RELATION_CAP = 8
 STYLE_NOTE_CAP = 5
 DUE_REVIEW_CAP = 5
 DEFAULT_MIN_EVIDENCE_CHARS = 40
+AUTO_MIN_EVIDENCE_CHARS = 50
+DEFAULT_SUCCESS_STATEMENT = (
+    "Learner can explain the core ideas in their own words and apply them to a simple example."
+)
+SUCCESS_DESCRIPTION_MAX_CHARS = 400
 
 
 @dataclass(slots=True)

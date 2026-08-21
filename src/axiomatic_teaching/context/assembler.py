@@ -105,13 +105,13 @@ def kickoff_prompt(lesson: Lesson) -> str:
         return (
             f"This lesson titled {lesson.title} is already banked. Restudy only: "
             "do not call record_lesson_success. Start with one diagnostic question "
-            "at the edge of competence. The learner already sees the criteria — "
-            "do not recap them. Wait for their answer."
+            "at the edge of competence. The learner already sees the success "
+            "criterion — do not recap it. Wait for their answer."
         )
     return (
         f"Begin the lesson titled {lesson.title}. "
         "Start with one diagnostic question at the edge of competence. "
-        "The learner already sees the success criteria — do not recap them. "
+        "The learner already sees the success criterion — do not recap it. "
         "Wait for their answer before teaching. Do not lecture. "
         "Do not declare the lesson complete yourself."
     )
@@ -143,20 +143,18 @@ def _format_current_lesson(lesson: Lesson, criteria: list[Criterion]) -> str:
         f"- **Description:** {_truncate(lesson.description, 240)}",
         f"- **Success description:** {_truncate(lesson.success_description, 240)}",
         "",
-        "### Success criteria",
+        "### Success criterion",
     ]
     if not criteria:
-        lines.append("_No success criteria listed._")
+        lines.append("_No success criterion listed._")
         return "\n".join(lines)
     for criterion in criteria:
-        kind = getattr(criterion.kind, "value", criterion.kind)
         keywords = ", ".join(criterion.keywords) if criterion.keywords else "(none)"
         required = "true" if criterion.required else "false"
         lines.extend(
             [
                 f"#### {criterion.id}",
                 f"- **id:** {criterion.id}",
-                f"- **kind:** {kind}",
                 f"- **statement:** {criterion.statement}",
                 f"- **required:** {required}",
                 f"- **min_evidence_chars:** {criterion.min_evidence_chars}",

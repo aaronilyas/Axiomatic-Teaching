@@ -1,4 +1,4 @@
-"""Current lesson success criteria with ✓/✗ from the last GateResult."""
+"""Current lesson success criterion with ✓/✗ from the last GateResult."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ class CriteriaPanel(Vertical):
         self._result: GateResult | None = None
 
     def compose(self) -> ComposeResult:
-        yield Static("Success criteria", classes="panel-title")
+        yield Static("Success", classes="panel-title")
         with VerticalScroll():
             yield Static("[dim]No lesson selected.[/]", id="criteria-body")
 
@@ -66,9 +66,12 @@ class CriteriaPanel(Vertical):
             return
         criteria = list(lesson.criteria)
         if not criteria:
-            body.update("[dim]This lesson has no criteria.[/]")
+            body.update("[dim]This lesson has no success criterion.[/]")
             return
         lines: list[str] = []
+        if lesson.success_description:
+            lines.append(escape(lesson.success_description))
+            lines.append("")
         if self._result is not None:
             if self._result.already_banked:
                 lines.append("[cyan]Already banked.[/]")
@@ -87,11 +90,12 @@ class CriteriaPanel(Vertical):
             else:
                 general.append(item.reason)
         for criterion in sorted(criteria, key=lambda item: item.sort_order):
-            req = "req" if criterion.required else "opt"
-            kind = criterion.kind
             mark = _mark(criterion, self._result)
             statement = escape(criterion.statement)
-            lines.append(f"{mark} [{kind}/{req}] {statement}")
+            if lesson.success_description and statement == escape(lesson.success_description):
+                lines.append(f"{mark} Gate")
+            else:
+                lines.append(f"{mark} {statement}")
             extras = []
             if criterion.min_evidence_chars:
                 extras.append(f"min {criterion.min_evidence_chars} chars")

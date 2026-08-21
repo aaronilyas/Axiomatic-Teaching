@@ -11,7 +11,7 @@ from axiomatic_teaching.acp_client.events import StreamChunk, ToolCallEvent
 from axiomatic_teaching.acp_client.grok import GrokSession
 from axiomatic_teaching.config import Settings
 from axiomatic_teaching.db.repository import create_repository
-from axiomatic_teaching.models import CriterionDraft, CriterionKind, NewLessonSpec
+from axiomatic_teaching.models import NewLessonSpec
 
 
 async def main() -> int:
@@ -25,16 +25,7 @@ async def main() -> int:
         NewLessonSpec(
             title="Hash tables",
             topic="data-structures",
-            success_description="Explain hashing plus collisions.",
-            criteria=[
-                CriterionDraft(
-                    kind=CriterionKind.EXPLAIN,
-                    statement="Explain hashing and collision handling.",
-                    required=True,
-                    min_evidence_chars=40,
-                    keywords=["collision"],
-                )
-            ],
+            success_description="Explain hashing plus collision handling.",
         )
     )
     os.environ["AXIOMATIC_LESSON_ID"] = lesson.id

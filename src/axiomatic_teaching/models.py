@@ -228,7 +228,8 @@ class NewLessonSpec(BaseModel):
     description: str = ""
     success_description: str = ""
     tags: list[str] = Field(default_factory=list)
-    criteria: list[CriterionDraft]
+    # Empty means create_lesson will derive one required criterion automatically.
+    criteria: list[CriterionDraft] = Field(default_factory=list)
 
     @field_validator("title", "topic")
     @classmethod
@@ -240,7 +241,7 @@ class NewLessonSpec(BaseModel):
 
     @field_validator("criteria")
     @classmethod
-    def at_least_one_required(cls, value: list[CriterionDraft]) -> list[CriterionDraft]:
-        if not any(item.required for item in value):
+    def required_if_provided(cls, value: list[CriterionDraft]) -> list[CriterionDraft]:
+        if value and not any(item.required for item in value):
             raise ValueError("at least one required criterion is required")
         return value

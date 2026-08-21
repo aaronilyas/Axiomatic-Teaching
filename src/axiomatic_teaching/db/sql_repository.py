@@ -26,6 +26,7 @@ from axiomatic_teaching.db.orm import (
     StyleNoteRow,
     SuccessCriterionRow,
 )
+from axiomatic_teaching.gate.criteria import resolve_criteria
 from axiomatic_teaching.gate.success import evaluate
 from axiomatic_teaching.models import (
     BankedLessonSummary,
@@ -169,7 +170,8 @@ class SqlRepository:
         dispose_engine(self.engine)
 
     def create_lesson(self, spec: NewLessonSpec) -> Lesson:
-        if not any(c.required for c in spec.criteria):
+        drafts, success_description = resolve_criteria(spec)
+        if not any(c.required for c in drafts):
             raise ValueError("at least one required criterion is required")
         now = _utcnow()
         lesson_id = _new_id()
@@ -179,7 +181,7 @@ class SqlRepository:
                 title=spec.title,
                 topic=spec.topic,
                 description=spec.description,
-                success_description=spec.success_description,
+                success_description=success_description,
                 status=LessonStatus.ACTIVE.value,
                 tags_json=_dumps(list(spec.tags)),
                 created_at=now,
@@ -188,7 +190,7 @@ class SqlRepository:
                 last_session_id=None,
             )
             session.add(row)
-            for index, draft in enumerate(spec.criteria):
+            for index, draft in enumerate(drafts):
                 session.add(
                     SuccessCriterionRow(
                         id=_new_id(),

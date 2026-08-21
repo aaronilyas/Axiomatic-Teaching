@@ -4,12 +4,13 @@ Product acceptance test:
 
 1. tempfile sqlite
 2. create_repository
-3. create_lesson with 2 required criteria (one with keywords [\"recursion\"],
-   min_evidence_chars=40)
-4. insufficient evidence (too short / missing keyword / met false) → rejected,
+3. create_lesson from title/topic plus a short success description (no
+   criteria editor); one auto-derived required criterion with keywords
+   including \"recursion\" and min_evidence_chars=50
+4. insufficient evidence (too short / missing keyword) → rejected,
    no completion, no style notes, lesson still active
-5. sufficient evidence covering both criteria → accepted, completion exists,
-   lesson completed, FSRS card if the repository creates one
+5. sufficient evidence covering the auto-derived criterion → accepted,
+   completion exists, lesson completed, FSRS card if the repository creates one
 6. third call → already_banked, still one completion
 7. print PASS/FAIL and exit 0/1
 

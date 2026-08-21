@@ -25,8 +25,9 @@ _REPO: SqlRepository | None = None
 _REPO_PATH: Path | None = None
 
 RECORD_LESSON_SUCCESS_DESCRIPTION = (
-    "Bank this lesson's knowledge after the learner has met every required success "
-    "criterion. Use criterion_id values from get_lesson_criteria; do not invent ids. "
+    "Bank this lesson's knowledge after the learner has met the required success "
+    "criterion (usually one, derived from the lesson's short success description). "
+    "Use criterion_id values from get_lesson_criteria; do not invent ids. "
     "This tool rejects incomplete evidence (missing required items, too-short text, "
     "missing keywords, or met=false). This is the only way to bank knowledge — there "
     "is no other write path for completions, concepts, or style notes."
@@ -210,8 +211,8 @@ def _make_mcp():
     mcp.tool(description=RECORD_LESSON_SUCCESS_DESCRIPTION)(record_lesson_success)
     mcp.tool(
         description=(
-            "Read the current lesson and its success criteria, including criterion_id "
-            "values that record_lesson_success requires."
+            "Read the current lesson and its success criterion, including the "
+            "criterion_id that record_lesson_success requires."
         )
     )(get_lesson_criteria)
     mcp.tool(

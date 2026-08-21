@@ -1,6 +1,6 @@
 # Axiomatic Teaching
 
-A Textual TUI that sits between a human learner and [Grok Build](https://docs.x.ai/build/overview), driven exclusively over the Agent Client Protocol (ACP). The TUI is the only learner-facing UI. Knowledge is banked if and only if the MCP tool `record_lesson_success` accepts evidence that satisfies the learner-defined success criteria stored in SQLite.
+A Textual TUI that sits between a human learner and [Grok Build](https://docs.x.ai/build/overview), driven exclusively over the Agent Client Protocol (ACP). The TUI is the only learner-facing UI. Knowledge is banked if and only if the MCP tool `record_lesson_success` accepts evidence that satisfies the lesson's success criterion stored in SQLite.
 
 There is no “mark complete” button. Completions, concepts, style notes, and FSRS cards are written only when the success gate passes.
 
@@ -41,23 +41,23 @@ Default SQLite path is `%LOCALAPPDATA%\AxiomaticTeaching\axiomatic.db` on Window
 
 ## Create a lesson
 
-From Home, press `n` to open the lesson wizard. It cannot be skipped.
+From Home, press `n` to open the new-lesson form.
 
-1. Title and topic are required. Description and tags are optional.
-2. Optional free-text success description (“what success looks like”).
-3. Success criteria editor (required): add/remove/reorder rows. Each row has kind (`explain`, `apply`, `connect`, `demonstrate`, `recall`, `custom`), statement, required toggle, minimum evidence characters, and keywords.
-4. At least one **required** criterion is needed to create. Confirm → the lesson is stored as `active`.
+1. Title and topic are required.
+2. An optional short success description (“what success looks like”, one or two sentences). Leave it blank to use a default: the learner can explain the core ideas in their own words and apply them to a simple example.
 
-Completed criteria are frozen. The TUI does not bank a lesson; only `record_lesson_success` does.
+There is no criteria editor. The app derives a single required criterion automatically: keywords from the success description (or from the title and topic if it was left blank), plus a default minimum evidence length of 50 characters of the learner’s own words. Confirm → the lesson is stored as `active`.
+
+The TUI does not bank a lesson; only `record_lesson_success` does.
 
 ## Study
 
 From Home, select an active lesson and press Enter or `s`.
 
 - The TUI starts an ACP session with Grok Build: `grok agent --always-approve stdio` (or the echo agent in `--demo`).
-- `session/new` attaches the axiomatic MCP server (stdio) and injects a small pedagogical context: current criteria, a few related **banked** lessons, 1-hop connections, style notes, and due reviews (hard-capped; current criteria are never truncated; long descriptions are capped).
+- `session/new` attaches the axiomatic MCP server (stdio) and injects a small pedagogical context: the current success criterion, a few related **banked** lessons, 1-hop connections, style notes, and due reviews (hard-capped; the current criterion is never truncated; long descriptions are capped).
 - A short kickoff prompt asks Grok for one diagnostic question and to wait. Subsequent input is `session/prompt`.
-- The center pane streams agent text, dim thought lines, and tool-call cards (`record_lesson_success` is highlighted). Criteria on the right show min-chars/keywords and update from the last gate result. A failed gate marks unmet rows ✗ and leaves the rest pending (○), never all-green.
+- The center pane streams agent text, dim thought lines, and tool-call cards (`record_lesson_success` is highlighted). The right pane shows the success description, min-chars/keywords, and the last gate result. A failed gate marks the criterion ✗ (never a false all-green).
 
 Session working directory is a per-lesson folder under the app data dir (`lessons/<id>/`), not this repository.
 
@@ -68,8 +68,8 @@ This MCP tool is the only writer of banked knowledge. Grok must pass `criterion_
 **Pass only when all of the following hold:**
 
 - The lesson exists and is `active` (drafts cannot be banked).
-- Every **required** criterion has a corresponding evidence item.
-- Each evidence `text`, stripped, is at least `min_evidence_chars` (default 40).
+- Every **required** criterion has a corresponding evidence item (new lessons have one auto-derived required criterion).
+- Each evidence `text`, stripped, is at least `min_evidence_chars` (50 for auto-derived criteria; 40 is the model default).
 - If a criterion has `keywords`, every keyword appears in the evidence text (case-insensitive, whitespace-normalized substring).
 - `met` is `true` for required items (`met: false` is an automatic reject).
 - Optional criteria may be omitted; if provided, they still must meet length, keywords, and `met`.
@@ -78,7 +78,7 @@ This MCP tool is the only writer of banked knowledge. Grok must pass `criterion_
 
 **On pass** (one SQLite transaction): insert the completion, mark the lesson `completed`, upsert proposed concepts/relations, insert a style note if non-empty, and create an FSRS card. **On fail:** return structured `unmet` reasons and write **no** completion, concepts, or style notes. Lessons cannot be marked completed through any other write path (`save_lesson` is rejected).
 
-Review cards show the original criteria and a short evidence snippet so rating is retrieval, not a title click.
+Review cards show the success description and a short evidence snippet so rating is retrieval, not a title click.
 
 A second successful call returns `already_banked` and does not insert another completion. Concurrent double-calls serialize on SQLite and also return `already_banked` rather than erroring.
 
@@ -105,7 +105,7 @@ axiomatic-teach verify
 python scripts/verify_critical_path.py
 ```
 
-`axiomatic-teach verify [--db PATH]` is the product acceptance test. It uses a temporary SQLite file (unless `--db` is given), creates a lesson with two required criteria, rejects insufficient evidence (too short / missing keyword / `met=false`), banks sufficient evidence, then asserts `already_banked` on a third call. No TUI and no Grok.
+`axiomatic-teach verify [--db PATH]` is the product acceptance test. It uses a temporary SQLite file (unless `--db` is given), creates a lesson from title/topic plus a short success description (no criteria editor), rejects insufficient evidence (too short / missing keywords), banks sufficient evidence, then asserts `already_banked` on a third call. No TUI and no Grok.
 
 ## Keyboard shortcuts
 
@@ -118,7 +118,7 @@ python scripts/verify_critical_path.py
 | `?` | Help |
 | `q` | Quit |
 | Ctrl+S | Study: send input |
-| Ctrl+Enter | Wizard: next step / create lesson |
+| Ctrl+Enter | New lesson: create |
 | Ctrl+C | Study: cancel the in-flight ACP turn |
 | Ctrl+Q / q | Quit (study unmount shuts the ACP child down, including the Windows process tree) |
 | Esc | Study: back (shuts down the session) |

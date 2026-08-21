@@ -34,10 +34,10 @@ _HELP = """[bold]Home[/]
   [cyan]q[/]          quit
   [cyan]?[/]          this help
 
-[bold]Lesson wizard[/]
-  Cannot skip success criteria. Need ≥1 required criterion.
-  Keywords + min chars are the gate; kind is a tutor hint.
-  [cyan]ctrl+enter[/] next / create
+[bold]New lesson[/]
+  Title and topic required. Success description optional (1–2 sentences).
+  A single criterion is derived automatically; there is no criteria editor.
+  [cyan]ctrl+enter[/] create
   [cyan]esc[/]        cancel
 
 [bold]Study[/]

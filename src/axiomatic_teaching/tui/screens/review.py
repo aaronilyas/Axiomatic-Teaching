@@ -103,12 +103,14 @@ class ReviewScreen(Screen[None]):
             lesson = self.app.repository.get_lesson(current.lesson_id)
         except Exception:
             lesson = None
-        if lesson is not None and lesson.criteria:
+        if lesson is not None and (lesson.success_description or lesson.criteria):
             lines.append("")
-            lines.append("[bold]Criteria[/]")
-            for criterion in lesson.criteria:
-                req = "req" if criterion.required else "opt"
-                lines.append(f"• [{criterion.kind}/{req}] {escape(criterion.statement)}")
+            lines.append("[bold]Success[/]")
+            if lesson.success_description:
+                lines.append(escape(lesson.success_description))
+            else:
+                for criterion in lesson.criteria:
+                    lines.append(f"• {escape(criterion.statement)}")
         completion = None
         try:
             completion = self.app.repository.get_completion(current.lesson_id)

@@ -165,10 +165,9 @@ def _format_evidence(
             lines.append("[dim]concepts: " + ", ".join(summary.concepts) + "[/]")
         lines.append("")
     if criteria:
-        lines.append("[bold]Criteria[/]")
+        lines.append("[bold]Success[/]")
         for criterion in criteria:
-            req = "req" if criterion.required else "opt"
-            lines.append(f"• [{criterion.kind}/{req}] {criterion.statement}")
+            lines.append(f"• {criterion.statement}")
         lines.append("")
     if completion is None:
         lines.append("[dim]No stored evidence.[/]")

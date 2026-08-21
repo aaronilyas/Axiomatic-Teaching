@@ -48,25 +48,19 @@ async def test_home_then_wizard_creates_active_lesson(tmp_path: Path) -> None:
         assert isinstance(app.screen, LessonWizard)
         screen = app.screen
 
-        screen.query_one("#field-text").value = "Recursion"
-        await pilot.click("#wizard-next")
-        await pilot.pause()
-        screen.query_one("#field-text").value = "algorithms"
-        await pilot.click("#wizard-next")
-        await pilot.pause()
-        await pilot.click("#wizard-next")  # description
-        await pilot.pause()
-        await pilot.click("#wizard-next")  # tags
-        await pilot.pause()
-        await pilot.click("#wizard-next")  # success description
-        await pilot.pause()
+        assert list(screen.query("#crit-kind")) == []
+        assert list(screen.query("#crit-statement")) == []
+        assert list(screen.query("#wizard-next")) == []
+        assert list(screen.query("#crit-required")) == []
+        assert list(screen.query("#crit-min")) == []
+        assert list(screen.query("#crit-keywords")) == []
 
-        statement = screen.query_one("#crit-statement")
-        statement.load_text(
+        screen.query_one("#field-title").value = "Recursion"
+        screen.query_one("#field-topic").value = "algorithms"
+        screen.query_one("#field-success").load_text(
             "Explain recursion, including a base case, in your own words."
         )
-        screen._save_criterion_form()
-        screen._commit_lesson()
+        await pilot.click("#wizard-create")
         await pilot.pause()
         for _ in range(4):
             if isinstance(app.screen, HomeScreen):
@@ -82,6 +76,84 @@ async def test_home_then_wizard_creates_active_lesson(tmp_path: Path) -> None:
         assert lesson.status == LessonStatus.ACTIVE
         assert len(lesson.criteria) == 1
         assert lesson.criteria[0].required is True
+        assert "recursion" in {k.lower() for k in lesson.criteria[0].keywords}
+        assert "base" in {k.lower() for k in lesson.criteria[0].keywords}
+
+
+@pytest.mark.asyncio
+async def test_wizard_blank_success_then_study_and_gate(tmp_path: Path) -> None:
+    from axiomatic_teaching.config import AUTO_MIN_EVIDENCE_CHARS, DEFAULT_SUCCESS_STATEMENT
+
+    app, repository = _app(tmp_path)
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        await pilot.press("n")
+        await pilot.pause()
+        assert isinstance(app.screen, LessonWizard)
+        screen = app.screen
+        screen.query_one("#field-title").value = "Bayes"
+        screen.query_one("#field-topic").value = "probability"
+        await pilot.click("#wizard-create")
+        await pilot.pause()
+        for _ in range(4):
+            if isinstance(app.screen, HomeScreen):
+                break
+            await pilot.press("escape")
+            await pilot.pause()
+
+        lessons = repository.list_lessons()
+        assert len(lessons) == 1
+        lesson = lessons[0]
+        assert lesson.success_description == DEFAULT_SUCCESS_STATEMENT
+        assert lesson.criteria[0].min_evidence_chars == AUTO_MIN_EVIDENCE_CHARS
+        assert "bayes" in {k.lower() for k in lesson.criteria[0].keywords}
+
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        assert isinstance(app.screen, StudyScreen)
+        body = str(app.screen.query_one("#criteria-body").render())
+        assert "core ideas" in body.lower() or "bayes" in body.lower()
+
+        too_short = repository.record_success(
+            RecordSuccessRequest(
+                lesson_id=lesson.id,
+                evidence=[
+                    EvidenceItem(
+                        criterion_id=lesson.criteria[0].id,
+                        text="nope",
+                        met=True,
+                    )
+                ],
+            )
+        )
+        assert too_short.accepted is False
+        assert repository.get_completion(lesson.id) is None
+
+        passing = (
+            "Bayes updates a prior with likelihood to get a posterior in probability. "
+            "I can walk a simple diagnostic-test example in my own words."
+        )
+        accepted = repository.record_success(
+            RecordSuccessRequest(
+                lesson_id=lesson.id,
+                evidence=[
+                    EvidenceItem(
+                        criterion_id=lesson.criteria[0].id,
+                        text=passing,
+                        met=True,
+                    )
+                ],
+            )
+        )
+        assert accepted.accepted is True
+        assert repository.get_completion(lesson.id) is not None
+
+        reloaded = repository.get_lesson(lesson.id)
+        app.screen.query_one("#study-criteria").set_lesson(reloaded)
+        app.screen.query_one("#study-criteria").apply_gate(accepted)
+        await pilot.pause()
+        gated = str(app.screen.query_one("#criteria-body").render())
+        assert "Gate PASS" in gated or "✓" in gated
 
 
 @pytest.mark.asyncio

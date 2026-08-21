@@ -160,48 +160,17 @@ CriteriaPanel, ConnectionsPanel {
     margin-bottom: 1;
 }
 
-#step-fields {
-    height: auto;
-}
-
-#field-long {
-    height: 8;
-}
-
-#step-criteria {
-    height: auto;
-}
-
-#crit-help {
-    height: auto;
+#field-title, #field-topic {
     margin-bottom: 1;
 }
 
-#criteria-editor {
-    height: 18;
+#field-success {
+    height: 8;
 }
 
-#crit-list {
-    width: 1fr;
-    border: tall #1e2a36;
-}
-
-#crit-form {
-    width: 1fr;
-    padding-left: 1;
-}
-
-#crit-statement {
-    height: 5;
-}
-
-#crit-required-row {
-    height: 3;
-    align: left middle;
-}
-
-#crit-buttons {
-    height: 3;
+#success-help {
+    height: auto;
+    margin: 1 0;
 }
 
 #wizard-nav {
