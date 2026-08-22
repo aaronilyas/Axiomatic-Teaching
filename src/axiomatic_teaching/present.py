@@ -67,8 +67,14 @@ _NEST_KEYS = (
     "arguments",
     "input",
     "params",
+    "tool_input",
+    "toolInput",
+    "args",
+    "parameters",
+    "value",
     "data",
     "raw_input",
+    "rawInput",
     "result",
     "output",
     "structuredContent",
@@ -76,6 +82,7 @@ _NEST_KEYS = (
     "content",
     "text",
     "OkayOutput",
+    "html",
 )
 
 
@@ -243,7 +250,7 @@ def parse_present_html(payload: object) -> PresentHtmlRequest | None:
     blob = _find_html_dict(payload, depth=0)
     if blob is None:
         return None
-    html = str(blob.get("html") or "").strip()
+    html = _coerce_html_text(blob.get("html")).strip()
     if not html:
         return None
     return PresentHtmlRequest(
@@ -339,15 +346,64 @@ def _find_html_dict(payload: object, depth: int) -> dict[str, Any] | None:
     blob = _coerce_dict(payload)
     if blob is None:
         return None
-    html = blob.get("html")
-    if isinstance(html, str) and html.strip():
-        return blob
+    if "html" in blob:
+        html_val = blob.get("html")
+        if _coerce_html_text(html_val).strip():
+            if html_val is not None and not isinstance(html_val, str):
+                nested = _find_html_dict(html_val, depth + 1)
+                if nested is not None:
+                    return nested
+            return blob
+        if html_val is not None and not isinstance(html_val, str):
+            nested = _find_html_dict(html_val, depth + 1)
+            if nested is not None:
+                return nested
     for key in _NEST_KEYS:
+        if key == "html":
+            continue
         if key in blob:
             found = _find_html_dict(blob[key], depth + 1)
             if found is not None:
                 return found
     return None
+
+
+def _coerce_html_text(value: object, depth: int = 0) -> str:
+    """Turn an html field into a string: str, JSON, or {text: ...} / list of blocks."""
+    if depth > 6 or value is None:
+        return ""
+    if isinstance(value, str):
+        text = value
+        stripped = text.strip()
+        if not stripped:
+            return ""
+        nested = _coerce_dict(stripped)
+        if nested is not None:
+            found = _coerce_html_text(nested, depth + 1)
+            if found.strip():
+                return found
+        return text
+    if isinstance(value, list):
+        parts = [_coerce_html_text(item, depth + 1) for item in value]
+        return "".join(part for part in parts if part)
+    blob = _coerce_dict(value)
+    if blob is None:
+        return ""
+    if "html" in blob:
+        found = _coerce_html_text(blob.get("html"), depth + 1)
+        if found.strip():
+            return found
+    text = blob.get("text")
+    if text is not None:
+        found = _coerce_html_text(text, depth + 1)
+        if found.strip():
+            return found
+    content = blob.get("content")
+    if content is not None:
+        found = _coerce_html_text(content, depth + 1)
+        if found.strip():
+            return found
+    return ""
 
 
 def _find_ok_dict(payload: object, depth: int) -> dict[str, Any] | None:
@@ -375,6 +431,15 @@ def _find_ok_dict(payload: object, depth: int) -> dict[str, Any] | None:
 def _coerce_dict(payload: object) -> dict[str, Any] | None:
     if isinstance(payload, dict):
         return payload
+    dump = getattr(payload, "model_dump", None)
+    if callable(dump):
+        try:
+            dumped = dump(mode="python", by_alias=False)
+        except TypeError:
+            dumped = dump()
+        if isinstance(dumped, dict):
+            return dumped
+        payload = dumped
     if not isinstance(payload, str):
         return None
     text = payload.strip()

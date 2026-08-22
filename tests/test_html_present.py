@@ -218,6 +218,64 @@ def test_parse_present_html_flat_and_nested() -> None:
     assert parse_present_html({"title": "nope"}) is None
 
 
+def test_parse_present_html_unwraps_grok_use_tool_envelopes() -> None:
+    envelope = parse_present_html(
+        {
+            "tool_name": "axiomatic__present_lesson_html",
+            "tool_input": {"html": "<p>Hi</p>", "title": "Fig"},
+        }
+    )
+    assert envelope is not None
+    assert envelope.html == "<p>Hi</p>"
+    assert envelope.title == "Fig"
+
+    json_tool_input = parse_present_html(
+        {
+            "tool_name": "axiomatic__present_lesson_html",
+            "tool_input": '{"html": "<p>Hi</p>", "title": "Fig"}',
+        }
+    )
+    assert json_tool_input is not None
+    assert json_tool_input.html == "<p>Hi</p>"
+    assert json_tool_input.title == "Fig"
+
+    json_raw = parse_present_html(
+        '{"tool_name": "axiomatic__present_lesson_html",'
+        ' "tool_input": {"html": "<p>Hi</p>", "title": "Fig"}}'
+    )
+    assert json_raw is not None
+    assert json_raw.html == "<p>Hi</p>"
+    assert json_raw.title == "Fig"
+
+    wrapped_value = parse_present_html({"value": {"html": "<p>Hi</p>", "title": "Fig"}})
+    assert wrapped_value is not None
+    assert wrapped_value.html == "<p>Hi</p>"
+
+    content_block = parse_present_html({"html": {"text": "<p>Hi</p>"}, "title": "Fig"})
+    assert content_block is not None
+    assert content_block.html == "<p>Hi</p>"
+    assert content_block.title == "Fig"
+
+    list_blocks = parse_present_html(
+        {"html": [{"type": "text", "text": "<p>Hi</p>"}], "title": "Fig"}
+    )
+    assert list_blocks is not None
+    assert list_blocks.html == "<p>Hi</p>"
+
+    params = parse_present_html({"params": {"html": "<p>P</p>"}})
+    assert params is not None
+    assert params.html == "<p>P</p>"
+
+    args = parse_present_html({"args": {"html": "<p>A</p>"}})
+    assert args is not None
+    assert args.html == "<p>A</p>"
+
+    camel = parse_present_html({"toolInput": {"html": "<p>C</p>", "css": "p{}"}})
+    assert camel is not None
+    assert camel.html == "<p>C</p>"
+    assert camel.css == "p{}"
+
+
 def test_parse_present_html_ignores_agent_path() -> None:
     req = parse_present_html(
         {"html": "<p>X</p>", "path": "/tmp/evil.html", "filename": "../escape.html"}

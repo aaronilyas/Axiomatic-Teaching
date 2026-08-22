@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, TypeVar
@@ -15,6 +16,8 @@ from axiomatic_teaching.present import parse_present_html
 
 GATE_TOOL_NAME = "record_lesson_success"
 PRESENT_HTML_TOOL_NAME = "present_lesson_html"
+_TOOL_NAME_KEYS = ("name", "tool", "toolName", "tool_name")
+_DISPATCHER_IDS = frozenset({"search_tool", "use_tool", "callmcptool", "call_mcp_tool"})
 
 FALLBACK_RULES = (
     "You are a Socratic tutor inside Axiomatic Teaching. "
@@ -112,20 +115,63 @@ def is_present_html_tool(event: ToolCallEvent) -> bool:
     return False
 
 
+def _is_dispatcher_label(label: str) -> bool:
+    text = (label or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    if lowered.startswith("search tools:"):
+        return True
+    ident = lowered.rsplit("__", 1)[-1]
+    return ident in _DISPATCHER_IDS or lowered in _DISPATCHER_IDS
+
+
+def _identity_matches(label: str, needle: str) -> bool:
+    text = (label or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    target = needle.lower()
+    return lowered == target or lowered.endswith("__" + target)
+
+
+def _event_payload_dict(raw: object) -> dict[str, Any] | None:
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    if text.startswith("```"):
+        lines = text.splitlines()
+        text = "\n".join(
+            line for line in lines if not line.strip().startswith("```")
+        ).strip() or text
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def _tool_name_in_event(event: ToolCallEvent, name: str) -> bool:
-    blob = " ".join(
-        part
-        for part in (event.title, event.kind, event.tool_call_id)
-        if part
-    ).lower()
-    if name in blob:
+    if event.title and not _is_dispatcher_label(event.title) and _identity_matches(
+        event.title, name
+    ):
+        return True
+    if event.kind and not _is_dispatcher_label(event.kind) and _identity_matches(
+        event.kind, name
+    ):
         return True
     for raw in (event.raw_input, event.raw_output):
-        if isinstance(raw, dict):
-            label = str(
-                raw.get("name") or raw.get("tool") or raw.get("toolName") or raw.get("tool_name") or ""
-            )
-            if name in label.lower():
+        blob = _event_payload_dict(raw)
+        if not blob:
+            continue
+        # Do not scan argument `title` (present_lesson_html's page title).
+        for key in _TOOL_NAME_KEYS:
+            value = blob.get(key)
+            if value and _identity_matches(str(value), name):
                 return True
     return False
 

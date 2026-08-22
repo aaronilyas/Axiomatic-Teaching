@@ -422,3 +422,276 @@ async def test_client_detects_present_by_html_payload_not_title() -> None:
     assert completed[0].raw_input.get("html") == "<p>Hi</p>"
     assert completed[0].is_present_html is True
     assert completed[0].is_success_gate is False
+
+
+def _tool_events(events: list[object]) -> list[ToolCallEvent]:
+    return [event for event in events if isinstance(event, ToolCallEvent)]
+
+
+@pytest.mark.asyncio
+async def test_client_search_tool_title_is_not_present_or_gate() -> None:
+    from acp.schema import ToolCallStart, ToolCallUpdate
+
+    from axiomatic_teaching.acp_client.client_impl import AxiomaticClient
+
+    events: list[object] = []
+    client = AxiomaticClient(events.append)
+    await client.session_update(
+        "sess",
+        ToolCallStart(
+            session_update="tool_call",
+            tool_call_id="search-present",
+            title="Search tools: present_lesson_html axiomatic",
+            status="pending",
+            raw_input={"query": "present_lesson_html axiomatic"},
+        ),
+    )
+    await client.session_update(
+        "sess",
+        ToolCallUpdate(
+            tool_call_id="search-present",
+            status="completed",
+            raw_output={"matches": ["present_lesson_html"]},
+        ),
+    )
+    await client.session_update(
+        "sess",
+        ToolCallStart(
+            session_update="tool_call",
+            tool_call_id="search-gate",
+            title="Search tools: get_lesson_criteria record_lesson_success axiomatic",
+            status="completed",
+            raw_input={"query": "get_lesson_criteria record_lesson_success axiomatic"},
+        ),
+    )
+    present_search = [
+        event
+        for event in _tool_events(events)
+        if event.tool_call_id == "search-present"
+    ]
+    gate_search = [
+        event for event in _tool_events(events) if event.tool_call_id == "search-gate"
+    ]
+    assert present_search
+    assert all(event.is_present_html is False for event in present_search)
+    assert all(event.is_success_gate is False for event in present_search)
+    assert gate_search
+    assert all(event.is_success_gate is False for event in gate_search)
+    assert all(event.is_present_html is False for event in gate_search)
+
+
+@pytest.mark.asyncio
+async def test_client_use_tool_envelope_is_present_html() -> None:
+    from acp.schema import ToolCallStart, ToolCallUpdate
+
+    from axiomatic_teaching.acp_client.client_impl import AxiomaticClient
+
+    events: list[object] = []
+    client = AxiomaticClient(events.append)
+    envelope = {
+        "tool_name": "axiomatic__present_lesson_html",
+        "tool_input": {"html": "<p>Hi</p>", "title": "Fig"},
+    }
+    await client.session_update(
+        "sess",
+        ToolCallStart(
+            session_update="tool_call",
+            tool_call_id="use1",
+            title="use_tool",
+            status="pending",
+            raw_input=envelope,
+        ),
+    )
+    await client.session_update(
+        "sess",
+        ToolCallUpdate(
+            tool_call_id="use1",
+            title="axiomatic__present_lesson_html",
+            status="completed",
+            raw_output={"ok": True, "open_status": "host_pending"},
+        ),
+    )
+    completed = [
+        event
+        for event in _tool_events(events)
+        if event.status == "completed" and event.tool_call_id == "use1"
+    ]
+    assert len(completed) == 1
+    assert completed[0].is_present_html is True
+    assert completed[0].is_success_gate is False
+    assert completed[0].raw_input.get("tool_input", {}).get("html") == "<p>Hi</p>"
+
+    pending = [
+        event
+        for event in _tool_events(events)
+        if event.status == "pending" and event.tool_call_id == "use1"
+    ]
+    assert pending
+    assert pending[0].is_present_html is True
+
+
+@pytest.mark.asyncio
+async def test_client_json_string_raw_input_and_tool_input() -> None:
+    from acp.schema import ToolCallStart
+
+    from axiomatic_teaching.acp_client.client_impl import AxiomaticClient
+
+    events: list[object] = []
+    client = AxiomaticClient(events.append)
+    await client.session_update(
+        "sess",
+        ToolCallStart(
+            session_update="tool_call",
+            tool_call_id="json-raw",
+            title="use_tool",
+            status="completed",
+            raw_input=(
+                '{"tool_name":"axiomatic__present_lesson_html",'
+                '"tool_input":{"html":"<p>Hi</p>","title":"Fig"}}'
+            ),
+        ),
+    )
+    raw = _tool_events(events)[-1]
+    assert raw.is_present_html is True
+    assert raw.raw_input.get("tool_name") == "axiomatic__present_lesson_html"
+    assert raw.raw_input.get("tool_input", {}).get("html") == "<p>Hi</p>"
+
+    events.clear()
+    await client.session_update(
+        "sess",
+        ToolCallStart(
+            session_update="tool_call",
+            tool_call_id="json-inner",
+            title="axiomatic__present_lesson_html",
+            status="completed",
+            raw_input={
+                "tool_name": "axiomatic__present_lesson_html",
+                "tool_input": '{"html":"<p>Hi</p>","title":"Fig"}',
+            },
+        ),
+    )
+    inner = _tool_events(events)[-1]
+    assert inner.is_present_html is True
+    assert inner.title == "axiomatic__present_lesson_html"
+
+
+@pytest.mark.asyncio
+async def test_client_keeps_html_when_completed_patch_is_slimmer() -> None:
+    from acp.schema import ToolCallStart, ToolCallUpdate
+
+    from axiomatic_teaching.acp_client.client_impl import AxiomaticClient
+
+    events: list[object] = []
+    client = AxiomaticClient(events.append)
+    await client.session_update(
+        "sess",
+        ToolCallStart(
+            session_update="tool_call",
+            tool_call_id="slim",
+            title="use_tool",
+            status="pending",
+            raw_input={
+                "tool_name": "axiomatic__present_lesson_html",
+                "tool_input": {"html": "<p>Hi</p>", "title": "Fig"},
+            },
+        ),
+    )
+    await client.session_update(
+        "sess",
+        ToolCallUpdate(
+            tool_call_id="slim",
+            title="axiomatic__present_lesson_html",
+            status="completed",
+            raw_input={"title": "Fig"},
+            raw_output={"ok": True, "open_status": "host_pending"},
+        ),
+    )
+    completed = [
+        event
+        for event in _tool_events(events)
+        if event.status == "completed" and event.tool_call_id == "slim"
+    ]
+    assert len(completed) == 1
+    assert completed[0].is_present_html is True
+    assert completed[0].raw_input.get("title") == "Fig"
+    tool_input = completed[0].raw_input.get("tool_input")
+    assert isinstance(tool_input, dict)
+    assert tool_input.get("html") == "<p>Hi</p>"
+
+    events.clear()
+    client = AxiomaticClient(events.append)
+    await client.session_update(
+        "sess",
+        ToolCallStart(
+            session_update="tool_call",
+            tool_call_id="empty",
+            title="use_tool",
+            status="pending",
+            raw_input={
+                "tool_name": "axiomatic__present_lesson_html",
+                "tool_input": {"html": "<p>Hi</p>", "title": "Fig"},
+            },
+        ),
+    )
+    await client.session_update(
+        "sess",
+        ToolCallUpdate(
+            tool_call_id="empty",
+            status="completed",
+            raw_input={},
+            raw_output={"ok": True, "open_status": "host_pending"},
+        ),
+    )
+    completed_empty = [
+        event
+        for event in _tool_events(events)
+        if event.status == "completed" and event.tool_call_id == "empty"
+    ]
+    assert completed_empty[0].raw_input.get("tool_input", {}).get("html") == "<p>Hi</p>"
+    assert completed_empty[0].is_present_html is True
+
+
+@pytest.mark.asyncio
+async def test_client_reads_grok_toolname_extra_and_content_html() -> None:
+    from acp.schema import ContentToolCallContent, TextContentBlock, ToolCallStart
+
+    from axiomatic_teaching.acp_client.client_impl import AxiomaticClient
+
+    events: list[object] = []
+    client = AxiomaticClient(events.append)
+    named = ToolCallStart(
+        session_update="tool_call",
+        tool_call_id="named",
+        title="Lesson figure",
+        status="completed",
+        raw_input={},
+    )
+    object.__setattr__(named, "toolName", "axiomatic__present_lesson_html")
+    await client.session_update("sess", named)
+    flagged = _tool_events(events)[-1]
+    assert flagged.is_present_html is True
+    assert flagged.is_success_gate is False
+
+    events.clear()
+    await client.session_update(
+        "sess",
+        ToolCallStart(
+            session_update="tool_call",
+            tool_call_id="content-html",
+            title="use_tool",
+            status="completed",
+            content=[
+                ContentToolCallContent(
+                    type="content",
+                    content=TextContentBlock(
+                        type="text",
+                        text='{"html":"<p>Hi</p>","title":"Fig"}',
+                    ),
+                )
+            ],
+        ),
+    )
+    from_content = _tool_events(events)[-1]
+    assert from_content.is_present_html is True
+    assert from_content.raw_input.get("html") == "<p>Hi</p>"
+    assert from_content.raw_input.get("title") == "Fig"

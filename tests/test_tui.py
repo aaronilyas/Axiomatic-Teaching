@@ -1024,3 +1024,260 @@ async def test_present_human_title_writes_file_without_dumping_html(
         chat = _chat_text(app.screen.query_one(ChatStream))
         assert "<p>Hi</p>" not in chat
         assert "Fig" in chat or "Lesson figure" in chat or "lesson page" in chat.lower()
+
+
+def _search_present_event() -> object:
+    from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+    return ToolCallEvent(
+        tool_call_id="search-present",
+        title="Search tools: present_lesson_html axiomatic",
+        status="completed",
+        raw_input={"query": "present_lesson_html axiomatic"},
+    )
+
+
+def _search_gate_event() -> object:
+    from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+    return ToolCallEvent(
+        tool_call_id="search-gate",
+        title="Search tools: get_lesson_criteria record_lesson_success axiomatic",
+        status="completed",
+        raw_input={"query": "get_lesson_criteria record_lesson_success axiomatic"},
+    )
+
+
+def _use_tool_present_event(
+    *,
+    tool_call_id: str = "use1",
+    status: str = "completed",
+    raw_input: dict | str | None = None,
+) -> object:
+    from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+    if raw_input is None:
+        raw_input = {
+            "tool_name": "axiomatic__present_lesson_html",
+            "tool_input": {"html": "<p>Hi</p>", "title": "Fig"},
+        }
+    return ToolCallEvent(
+        tool_call_id=tool_call_id,
+        title="use_tool" if status != "completed" else "axiomatic__present_lesson_html",
+        status=status,
+        raw_input=raw_input,  # type: ignore[arg-type]
+        raw_output={"ok": True, "open_status": "host_pending"}
+        if status == "completed"
+        else None,
+    )
+
+
+def test_search_tool_title_is_not_present_or_gate() -> None:
+    present_search = _search_present_event()
+    gate_search = _search_gate_event()
+    assert is_present_html_tool(present_search) is False
+    assert is_gate_tool(present_search) is False
+    assert is_gate_tool(gate_search) is False
+    assert is_present_html_tool(gate_search) is False
+
+
+def test_use_tool_envelope_is_present_html() -> None:
+    pending = _use_tool_present_event(status="pending")
+    completed = _use_tool_present_event(status="completed")
+    assert is_present_html_tool(pending) is True
+    assert is_gate_tool(pending) is False
+    assert is_present_html_tool(completed) is True
+    assert is_gate_tool(completed) is False
+
+
+@pytest.mark.asyncio
+async def test_search_tool_does_not_write_or_print_empty(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from axiomatic_teaching.present import ERROR_EMPTY
+
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    app, repository = _app(tmp_path)
+    lesson = _study_lesson(repository, "Search")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        app.dispatch_acp_event(_search_present_event())
+        await pilot.pause()
+        workspace = tmp_path / "lessons" / lesson.id
+        assert list(workspace.glob("present-*.html")) == [] if workspace.exists() else True
+        chat = _chat_text(app.screen.query_one(ChatStream))
+        assert ERROR_EMPTY not in chat
+        assert "HTML was empty" not in chat
+        assert "GATE" not in chat
+
+
+@pytest.mark.asyncio
+async def test_search_tool_record_success_is_not_gate_card(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    app, repository = _app(tmp_path)
+    lesson = _study_lesson(repository, "GateSearch")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        app.dispatch_acp_event(_search_gate_event())
+        await pilot.pause()
+        chat = _chat_text(app.screen.query_one(ChatStream))
+        assert "GATE" not in chat
+        assert is_gate_tool(_search_gate_event()) is False
+
+
+@pytest.mark.asyncio
+async def test_use_tool_present_writes_and_opens_when_not_demo(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import os
+
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    opened: list[str] = []
+    monkeypatch.setattr(
+        os,
+        "startfile",
+        lambda path: opened.append(str(path)) or True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "webbrowser.open_new_tab",
+        lambda uri: opened.append(uri) or True,
+    )
+    db = tmp_path / "axiomatic.db"
+    settings = Settings.from_cli(db=db, demo=False)
+    repository = create_repository(db)
+    app = AxiomaticApp(settings, repository, session_factory=None)
+    lesson = _study_lesson(repository, "GrokPresent")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        event = _use_tool_present_event()
+        assert is_present_html_tool(event) is True
+        app.dispatch_acp_event(event)
+        await pilot.pause()
+        workspace = tmp_path / "lessons" / lesson.id
+        files = list(workspace.glob("present-*.html"))
+        assert len(files) == 1
+        assert files[0].name == "present-001.html"
+        assert "Hi" in files[0].read_text(encoding="utf-8")
+        assert len(opened) == 1
+        assert "present-001.html" in str(opened[0])
+        chat = _chat_text(app.screen.query_one(ChatStream))
+        assert "HTML was empty" not in chat
+        assert "opened in your browser" in chat.lower()
+
+
+@pytest.mark.asyncio
+async def test_use_tool_present_json_string_payloads_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    app, repository = _app(tmp_path)
+    lesson = _study_lesson(repository, "JsonPresent")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        app.dispatch_acp_event(
+            _use_tool_present_event(
+                tool_call_id="json-inner",
+                raw_input={
+                    "tool_name": "axiomatic__present_lesson_html",
+                    "tool_input": '{"html":"<p>Hi</p>","title":"Fig"}',
+                },
+            )
+        )
+        await pilot.pause()
+        workspace = tmp_path / "lessons" / lesson.id
+        files = list(workspace.glob("present-*.html"))
+        assert len(files) == 1
+        assert "Hi" in files[0].read_text(encoding="utf-8")
+
+        app.dispatch_acp_event(
+            _use_tool_present_event(
+                tool_call_id="json-raw",
+                raw_input=(
+                    '{"tool_name":"axiomatic__present_lesson_html",'
+                    '"tool_input":{"html":"<p>Hi</p>","title":"Fig"}}'
+                ),
+            )
+        )
+        await pilot.pause()
+        names = sorted(path.name for path in workspace.glob("present-*.html"))
+        assert names == ["present-001.html", "present-002.html"]
+        assert "Hi" in (workspace / "present-002.html").read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_use_tool_pending_html_survives_slimmer_completed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AXIOMATIC_HOME", str(tmp_path))
+    app, repository = _app(tmp_path)
+    lesson = _study_lesson(repository, "SlimPatch")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await pilot.pause()
+        app.push_screen(StudyScreen(lesson))
+        await pilot.pause()
+        from axiomatic_teaching.acp_client.events import ToolCallEvent
+
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="slim",
+                title="use_tool",
+                status="pending",
+                raw_input={
+                    "tool_name": "axiomatic__present_lesson_html",
+                    "tool_input": {"html": "<p>Hi</p>", "title": "Fig"},
+                },
+            )
+        )
+        await pilot.pause()
+        workspace = tmp_path / "lessons" / lesson.id
+        assert list(workspace.glob("present-*.html")) == [] if workspace.exists() else True
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="slim",
+                title="axiomatic__present_lesson_html",
+                status="completed",
+                raw_input={"title": "Fig"},
+                raw_output={"ok": True, "open_status": "host_pending"},
+            )
+        )
+        await pilot.pause()
+        files = list(workspace.glob("present-*.html"))
+        assert len(files) == 1
+        assert "Hi" in files[0].read_text(encoding="utf-8")
+
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="empty",
+                title="use_tool",
+                status="pending",
+                raw_input={
+                    "tool_name": "axiomatic__present_lesson_html",
+                    "tool_input": {"html": "<p>Hi</p>", "title": "Fig"},
+                },
+            )
+        )
+        await pilot.pause()
+        app.dispatch_acp_event(
+            ToolCallEvent(
+                tool_call_id="empty",
+                title="axiomatic__present_lesson_html",
+                status="completed",
+                raw_input={},
+                raw_output={"ok": True, "open_status": "host_pending"},
+            )
+        )
+        await pilot.pause()
+        names = sorted(path.name for path in workspace.glob("present-*.html"))
+        assert names == ["present-001.html", "present-002.html"]
+        assert "Hi" in (workspace / "present-002.html").read_text(encoding="utf-8")
