@@ -62,7 +62,7 @@ From Home, select an active lesson and press Enter or `s`.
 - `session/new` attaches the axiomatic MCP server (stdio) and injects a small pedagogical context: the current success criterion, a few related **banked** lessons, 1-hop connections, style notes, and due reviews (hard-capped; the current criterion is never truncated; long descriptions are capped).
 - A short kickoff prompt asks Grok for one diagnostic question and to wait. Subsequent input is `session/prompt`.
 - After diagnostics, Grok may call `present_lesson_html`. The TUI writes a self-contained page into `lessons/<id>/present-NNN.html` and opens it with the system browser (`file://`). The ACP session stays live. Understanding-measurement questions stay in ChatStream — the HTML page is exposition only.
-- The center pane streams agent text, dim thought lines, and tool-call cards (`record_lesson_success` is highlighted). The right pane shows the success description, the derived min-chars/keywords, and the last gate result. A failed gate marks the criterion ✗ (never a false all-green). Older lessons that still have more than one criterion are listed the same way.
+- The center pane streams agent text (LaTeX math is approximated as Unicode so ChatStream stays selectable, copyable terminal text), dim thought lines, and tool-call cards (`record_lesson_success` is highlighted). The right pane shows the success description, the derived min-chars/keywords, and the last gate result. A failed gate marks the criterion ✗ (never a false all-green). Older lessons that still have more than one criterion are listed the same way.
 
 Session working directory is a per-lesson folder under the app data dir (`lessons/<id>/`), not this repository.
 

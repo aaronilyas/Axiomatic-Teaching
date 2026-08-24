@@ -16,6 +16,7 @@ from axiomatic_teaching.acp_client.events import (
     ToolCallEvent,
 )
 from axiomatic_teaching.tui import is_gate_tool, is_present_html_tool
+from axiomatic_teaching.tui.math_render import latex_to_unicode
 
 # Host-injected session context / Grok system blobs must never reach the learner.
 _HOST_CONTEXT_MARKERS = (
@@ -92,9 +93,12 @@ class ChatStream(RichLog):
             if prefix:
                 self.write(prefix)
         self._stream_buffer += chunk.text
+        # Convert complete math in the buffer before splitting so a display
+        # block that still contains newlines can become a single Unicode line.
+        self._stream_buffer = latex_to_unicode(self._stream_buffer)
         while "\n" in self._stream_buffer:
             line, self._stream_buffer = self._stream_buffer.split("\n", 1)
-            self.write(escape(line) if line else "")
+            self.write(_agent_markup(line) if line else "")
         self._arm_partial_flush()
 
     def append_thought(self, thought: ThoughtChunk) -> None:
@@ -167,7 +171,7 @@ class ChatStream(RichLog):
     def _flush_partial(self) -> None:
         self._partial_timer = None
         if self._stream_buffer:
-            self.write(escape(self._stream_buffer))
+            self.write(_agent_markup(self._stream_buffer))
             self._stream_buffer = ""
 
     def _flush_stream(self) -> None:
@@ -179,9 +183,14 @@ class ChatStream(RichLog):
         role = self._stream_role
         self._stream_role = None
         if leftover:
-            self.write(escape(leftover))
+            self.write(_agent_markup(leftover))
         elif role is None:
             return
+
+
+def _agent_markup(text: str) -> str:
+    """Escape tutor/agent text after Unicode math approximation."""
+    return escape(latex_to_unicode(text))
 
 
 def _role_prefix(role: str) -> str:
